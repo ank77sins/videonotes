@@ -120,13 +120,20 @@ export async function complete(
 
   if (cfg.provider === "ollama") {
     const base = (cfg.baseUrl || "http://localhost:11434").replace(/\/$/, "");
+
+    let ollamaModel = model;
+    if (!cfg.model?.trim()) {
+      const installed = await listOllamaModels(base).catch(() => [] as string[]);
+      if (installed.length) ollamaModel = installed[0];
+    }
+
     let data: any;
     try {
       data = await postJson(
         `${base}/api/chat`,
         {},
         {
-          model,
+          model: ollamaModel,
           messages,
           stream: false,
           options: { temperature, num_predict: maxTokens },
@@ -140,9 +147,7 @@ export async function complete(
         const hint = installed.length
           ? `Installed models: ${installed.join(", ")}. Set one of these as the model in Settings.`
           : "No models are installed yet. Run `ollama pull llama3.2:3b`.";
-        throw new Error(
-          `Ollama doesn't have the model "${model}". ${hint} (You can also leave the model blank to use the default.)`,
-        );
+        throw new Error(`Ollama doesn't have the model "${ollamaModel}". ${hint}`);
       }
       throw err;
     }

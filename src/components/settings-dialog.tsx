@@ -67,6 +67,10 @@ export function SettingsDialog({
   const provider = PROVIDERS.find((p) => p.value === draft.provider);
   const needsKey = draft.provider !== "none" && draft.provider !== "ollama";
 
+  const effectiveModel =
+    draft.model?.trim() ||
+    (draft.provider === "ollama" && models.length ? models[0] : "");
+
   const fetchModels = async (baseUrl: string) => {
     setLoadingModels(true);
     setModelsError(null);
@@ -74,8 +78,15 @@ export function SettingsDialog({
       const res = await fetch(`/api/llm/models?baseUrl=${encodeURIComponent(baseUrl)}`);
       const data = (await res.json()) as { ok?: boolean; models?: string[]; error?: string };
       if (data.ok) {
-        setModels(data.models ?? []);
-        if (!data.models?.length) setModelsError("Ollama is running but has no models. Run `ollama pull llama3.2:3b`.");
+        const list = data.models ?? [];
+        setModels(list);
+        if (!list.length) {
+          setModelsError("Ollama is running but has no models. Run `ollama pull llama3.2:3b`.");
+        } else {
+          setDraft((prev) =>
+            prev.model && list.includes(prev.model) ? prev : { ...prev, model: list[0] },
+          );
+        }
       } else {
         setModels([]);
         setModelsError(data.error ?? "Could not list models.");
@@ -94,7 +105,7 @@ export function SettingsDialog({
   }, [open, draft.provider]);
 
   const save = () => {
-    onSave(draft);
+    onSave({ ...draft, model: effectiveModel });
     onOpenChange(false);
   };
 
@@ -104,7 +115,7 @@ export function SettingsDialog({
       const res = await fetch("/api/llm/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ llm: toLlmConfig(draft) }),
+        body: JSON.stringify({ llm: toLlmConfig({ ...draft, model: effectiveModel }) }),
       });
       const data = (await res.json()) as { ok?: boolean; reply?: string; error?: string };
       if (data.ok) setTest({ kind: "ok", reply: data.reply ?? "" });
@@ -194,7 +205,7 @@ export function SettingsDialog({
               </div>
               {draft.provider === "ollama" && models.length ? (
                 <Select
-                  value={draft.model || models[0]}
+                  value={effectiveModel}
                   onValueChange={(v) => setDraft({ ...draft, model: v })}
                 >
                   <SelectTrigger id="model">
