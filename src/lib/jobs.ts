@@ -108,6 +108,15 @@ export function startJob(input: StartJobInput): string {
   insertJob(record);
 
   void (async () => {
+    const heartbeat = setInterval(() => {
+      try {
+        updateJob(id, {});
+      } catch {
+        // best effort
+      }
+    }, 20_000);
+    if (typeof heartbeat.unref === "function") heartbeat.unref();
+
     await acquire();
     try {
       checkCancelled(id);
@@ -131,6 +140,7 @@ export function startJob(input: StartJobInput): string {
       }
       cleanupWorkDir(id);
     } finally {
+      clearInterval(heartbeat);
       cancelled.delete(id);
       release();
     }

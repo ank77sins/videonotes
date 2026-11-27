@@ -15,7 +15,7 @@ type DB = Database.Database;
 
 const globalForDb = globalThis as unknown as { __ytpdfDb?: DB };
 
-const STALE_AFTER_MS = 3 * 60 * 1000;
+const STALE_AFTER_MS = 30 * 60 * 1000;
 
 function createDb(): DB {
   const db = new Database(path.join(DATA_DIR, "app.db"));
@@ -48,7 +48,7 @@ function createDb(): DB {
     `UPDATE jobs
         SET status = 'error',
             step = 'Interrupted',
-            error = COALESCE(error, 'The server restarted before this job finished. Please generate it again.'),
+            error = COALESCE(error, 'The app was closed or restarted while this job was running. Please generate it again.'),
             updated_at = ?
       WHERE status IN ('queued', 'running') AND updated_at < ?`,
   ).run(Date.now(), staleCutoff);
