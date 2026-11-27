@@ -36,16 +36,24 @@ function buildChunks(segments: TranscriptSegment[]): Chunk[] {
   return chunks;
 }
 
-const MAX_CHUNKS = 20;
+const MAX_CHUNKS = 8;
+const CHUNK_MAX_TOKENS = 400;
+const SINGLE_PASS_CHARS = 24000;
+const CHUNK_CONCURRENCY = 2;
 
-function limitChunks(chunks: Chunk[]): Chunk[] {
+function mergeIntoFew(chunks: Chunk[]): Chunk[] {
   if (chunks.length <= MAX_CHUNKS) return chunks;
-  const step = (chunks.length - 1) / (MAX_CHUNKS - 1);
-  const picked: Chunk[] = [];
-  for (let i = 0; i < MAX_CHUNKS; i++) {
-    picked.push(chunks[Math.round(i * step)]);
+  const groups = MAX_CHUNKS;
+  const per = Math.ceil(chunks.length / groups);
+  const out: Chunk[] = [];
+  for (let i = 0; i < chunks.length; i += per) {
+    const slice = chunks.slice(i, i + per);
+    out.push({
+      text: slice.map((c) => c.text).join("\n"),
+      start: slice[0].start,
+    });
   }
-  return picked;
+  return out;
 }
 
 function safeJson<T>(raw: string): T | null {
@@ -92,29 +100,43 @@ async function mapChunks(
   cfg: LlmConfig,
   onProgress?: (done: number, total: number) => void,
 ): Promise<string[]> {
-  const out: string[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  const out: string[] = new Array(chunks.length).fill("");
+  let done = 0;
+
+  const summarizeChunk = async (index: number): Promise<void> => {
+    const chunk = chunks[index];
     try {
-      const notes = await complete(
+      out[index] = await complete(
         cfg,
         [
           {
             role: "system",
             content:
-              "You are an expert note-taker. Extract the key ideas from this section of a video transcript. Keep timestamps like [mm:ss] where useful. Output compact bullet points only, no preamble.",
+              "You are an expert note-taker. Extract the key ideas from this section of a video transcript. Keep timestamps like [mm:ss] where useful. Output at most 5 short bullet points, no preamble.",
           },
           { role: "user", content: chunk.text },
         ],
-        { temperature: 0.2, maxTokens: 1200 },
+        { temperature: 0.2, maxTokens: CHUNK_MAX_TOKENS },
       );
-      out.push(notes);
     } catch (err) {
-      out.push(`(section starting ${formatTimestamp(chunk.start)} could not be summarized)`);
-      if (i === 0) throw err;
+      out[index] = `(section starting ${formatTimestamp(chunk.start)} could not be summarized)`;
+      if (index === 0) throw err;
     }
-    onProgress?.(i + 1, chunks.length);
-  }
+    done++;
+    onProgress?.(done, chunks.length);
+  };
+
+  let next = 0;
+  const worker = async () => {
+    while (next < chunks.length) {
+      const index = next++;
+      await summarizeChunk(index);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CHUNK_CONCURRENCY, chunks.length) }, () => worker()),
+  );
   return out;
 }
 
@@ -158,7 +180,7 @@ async function synthesize(
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 8000 },
+    { temperature: 0.3, maxTokens: 2500 },
   );
 
   const parsed = safeJson<NotesDocument>(raw);
@@ -277,10 +299,22 @@ export async function buildNotes(
   }
 
   try {
-    const chunks = limitChunks(buildChunks(segments));
-    onProgress?.("Summarizing transcript sections", 0);
+    const rawChunks = buildChunks(segments);
+    const totalChars = segments.reduce((sum, s) => sum + s.text.length, 0);
+
+    if (totalChars <= SINGLE_PASS_CHARS) {
+      onProgress?.("Writing notes (single pass)", 10);
+      const single = rawChunks.map((c) => c.text).join("\n").slice(0, MAX_TRANSCRIPT_CHARS);
+      const notes = await synthesize([single], meta, options, slides, cfg);
+      if (!notes.sections.length) throw new Error("The model returned no sections.");
+      onProgress?.("Writing notes (single pass)", 100);
+      return { notes, usedAi: true };
+    }
+
+    const chunks = mergeIntoFew(rawChunks);
+    onProgress?.(`Summarizing ${chunks.length} sections`, 0);
     const chunkNotes = await mapChunks(chunks, cfg, (done, total) =>
-      onProgress?.("Summarizing transcript sections", Math.round((done / total) * 100)),
+      onProgress?.(`Summarizing ${total} sections`, Math.round((done / total) * 100)),
     );
 
     onProgress?.("Writing final notes", 50);

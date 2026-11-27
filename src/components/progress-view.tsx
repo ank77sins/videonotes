@@ -16,6 +16,13 @@ import { Progress } from "@/components/ui/progress";
 import type { JobView } from "@/lib/types";
 import { VideoDownloadControl } from "./video-download";
 
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+}
+
 const PHASES = [
   { label: "Preparing", at: 3 },
   { label: "Capturing slides", at: 8 },
@@ -29,6 +36,13 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
   const [job, setJob] = useState<JobView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(tick);
+  }, [jobId]);
 
   useEffect(() => {
     let active = true;
@@ -102,7 +116,9 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <p className="truncate font-medium">{job.title ?? "Your video"}</p>
-          <span className="tabular-nums text-sm text-muted-foreground">{job.progress}%</span>
+          <span className="shrink-0 tabular-nums text-sm text-muted-foreground">
+            {job.progress}% · {formatElapsed(elapsed)}
+          </span>
         </div>
         <Progress value={job.progress} aria-label="Generation progress" />
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -124,6 +140,12 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
                 : (job.step ?? "Working")}
           {active && job.message ? ` — ${job.message}` : ""}
         </p>
+        {active && job.provider === "ollama" ? (
+          <p className="text-xs text-muted-foreground">
+            Running on your local model. A 20-minute video usually takes a few minutes — the
+            percentage can pause while the model writes.
+          </p>
+        ) : null}
         {active ? (
           <Button
             variant="ghost"
