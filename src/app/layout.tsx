@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
@@ -19,6 +19,14 @@ export const metadata: Metadata = {
   title: "VideoNotes — YouTube to study PDF",
   description:
     "Turn a YouTube video into a PDF with AI notes, slides, and the full transcript.",
+  applicationName: "VideoNotes",
+  appleWebApp: { capable: true, title: "VideoNotes", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0f172a",
 };
 
 export default function RootLayout({
