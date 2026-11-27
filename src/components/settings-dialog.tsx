@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DEFAULT_SETTINGS, type Settings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, toLlmConfig, type Settings } from "@/lib/settings";
 import type { LlmProvider } from "@/lib/types";
 
 const PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
@@ -35,8 +35,10 @@ const MODEL_HINTS: Record<LlmProvider, string> = {
   gemini: "gemini-2.0-flash",
   groq: "llama-3.3-70b-versatile",
   openrouter: "google/gemini-2.0-flash-exp:free",
-  ollama: "llama3.1",
+  ollama: "llama3.2:3b",
 };
+
+type TestState = { kind: "idle" } | { kind: "testing" } | { kind: "ok"; reply: string } | { kind: "error"; error: string };
 
 export function SettingsDialog({
   settings,
@@ -50,9 +52,13 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState<Settings>(settings);
+  const [test, setTest] = useState<TestState>({ kind: "idle" });
 
   useEffect(() => {
-    if (open) setDraft(settings);
+    if (open) {
+      setDraft(settings);
+      setTest({ kind: "idle" });
+    }
   }, [open, settings]);
 
   const provider = PROVIDERS.find((p) => p.value === draft.provider);
@@ -61,6 +67,22 @@ export function SettingsDialog({
   const save = () => {
     onSave(draft);
     onOpenChange(false);
+  };
+
+  const runTest = async () => {
+    setTest({ kind: "testing" });
+    try {
+      const res = await fetch("/api/llm/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ llm: toLlmConfig(draft) }),
+      });
+      const data = (await res.json()) as { ok?: boolean; reply?: string; error?: string };
+      if (data.ok) setTest({ kind: "ok", reply: data.reply ?? "" });
+      else setTest({ kind: "error", error: data.error ?? "Connection failed." });
+    } catch (err) {
+      setTest({ kind: "error", error: err instanceof Error ? err.message : "Connection failed." });
+    }
   };
 
   return (
@@ -120,8 +142,8 @@ export function SettingsDialog({
                 onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                Ollama must run where the app server can reach it. It can&apos;t run inside this
-                sandbox.
+                Default is http://localhost:11434. The app talks to Ollama from its own server, so
+                keep it running in the background.
               </p>
             </div>
           ) : null}
@@ -139,11 +161,32 @@ export function SettingsDialog({
           ) : null}
         </div>
 
+        {test.kind === "ok" ? (
+          <p className="text-xs text-emerald-600 dark:text-emerald-400">
+            Connected — model replied “{test.reply || "ok"}”.
+          </p>
+        ) : null}
+        {test.kind === "error" ? (
+          <p className="text-xs text-destructive">Couldn&apos;t connect: {test.error}</p>
+        ) : null}
+
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" onClick={() => setDraft({ ...DEFAULT_SETTINGS })} type="button">
             Reset
           </Button>
-          <Button onClick={save}>Save</Button>
+          <div className="flex items-center gap-2">
+            {draft.provider !== "none" ? (
+              <Button
+                variant="outline"
+                type="button"
+                onClick={runTest}
+                disabled={test.kind === "testing"}
+              >
+                {test.kind === "testing" ? "Testing…" : "Test connection"}
+              </Button>
+            ) : null}
+            <Button onClick={save}>Save</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
