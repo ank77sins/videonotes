@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { DEFAULT_OPTIONS, type PdfOptions, type VideoMeta } from "@/lib/types";
 import type { LoadedVideo } from "./url-form";
+import { VideoDownloadControl } from "./video-download";
 
 const fieldClass = "space-y-2";
 
@@ -198,6 +199,20 @@ export function PdfOptionsForm({
             <span className="block text-xs text-muted-foreground">Append the full text.</span>
           </span>
         </label>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">Also want the video file?</p>
+          <p className="text-xs text-muted-foreground">
+            Download the MP4 separately. Preparing it can take a minute.
+          </p>
+        </div>
+        <VideoDownloadControl
+          url={meta.url}
+          title={meta.title}
+          cookies={video.cookies}
+        />
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">

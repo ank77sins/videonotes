@@ -5,6 +5,7 @@ import { CheckCircle2, Download, ExternalLink, Loader2, RotateCcw, TriangleAlert
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { JobView } from "@/lib/types";
+import { VideoDownloadControl } from "./video-download";
 
 const PHASES = [
   { label: "Preparing", at: 3 },
@@ -142,23 +143,26 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
       ) : null}
 
       {done ? (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button asChild className="gap-2">
-            <a href={`/api/pdf/${job.id}?download=1`}>
-              <Download className="size-4" aria-hidden />
-              Download PDF
-            </a>
-          </Button>
-          <Button asChild variant="outline" className="gap-2">
-            <a href={`/api/pdf/${job.id}`} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" aria-hidden />
-              Open in new tab
-            </a>
-          </Button>
-          <Button variant="ghost" onClick={onReset} className="gap-2">
-            <RotateCcw className="size-4" aria-hidden />
-            New video
-          </Button>
+        <div className="space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild className="gap-2">
+              <a href={`/api/pdf/${job.id}?download=1`}>
+                <Download className="size-4" aria-hidden />
+                Download PDF
+              </a>
+            </Button>
+            <Button asChild variant="outline" className="gap-2">
+              <a href={`/api/pdf/${job.id}`} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" aria-hidden />
+                Open in new tab
+              </a>
+            </Button>
+            <VideoDownloadControl url={job.url} title={job.title ?? undefined} compact />
+            <Button variant="ghost" onClick={onReset} className="gap-2">
+              <RotateCcw className="size-4" aria-hidden />
+              New video
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>
