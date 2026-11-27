@@ -71,6 +71,7 @@ export interface NotesDocument {
   sections: NotesSection[];
   keyTakeaways: string[];
   questions?: { q: string; a: string }[];
+  warning?: string;
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";

@@ -146,6 +146,20 @@ function cover(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, input: RenderInp
     size: 9,
     color: "#6b7280",
   });
+  if (input.notes.warning) {
+    writeText(
+      doc,
+      fonts,
+      `Note: AI notes were unavailable (${input.notes.warning.slice(0, 160)}). These notes were generated offline instead.`,
+      {
+        x: PAGE.margin,
+        y: h - 78,
+        width: w - PAGE.margin * 2,
+        size: 8,
+        color: "#9ca3af",
+      },
+    );
+  }
   doc.addPage();
 }
 

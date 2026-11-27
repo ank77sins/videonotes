@@ -32,17 +32,45 @@ function assertConfigured(cfg: LlmConfig) {
   }
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
-  });
+const DEFAULT_TIMEOUT_MS = 180_000;
+
+async function postJson(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+) {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new Error(
+        `The model took longer than ${Math.round(timeoutMs / 1000)}s to respond. ` +
+          `Try a smaller model or a shorter video.`,
+      );
+    }
+    throw new Error(
+      `Could not reach the model server. Is it running? (${err instanceof Error ? err.message : "network error"})`,
+    );
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`LLM request failed (${res.status}): ${text.slice(0, 300)}`);
   }
   return res.json();
+}
+
+function timeoutFor(cfg: LlmConfig, maxTokens: number): number {
+  if (cfg.provider === "ollama") {
+    return Math.max(300_000, maxTokens * 120);
+  }
+  return DEFAULT_TIMEOUT_MS;
 }
 
 export async function complete(
@@ -54,6 +82,7 @@ export async function complete(
   const model = resolveModel(cfg);
   const temperature = opts.temperature ?? 0.3;
   const maxTokens = opts.maxTokens ?? 4096;
+  const timeoutMs = timeoutFor(cfg, maxTokens);
 
   if (cfg.provider === "gemini") {
     const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
@@ -68,6 +97,7 @@ export async function complete(
         contents,
         generationConfig: { temperature, maxOutputTokens: maxTokens },
       },
+      timeoutMs,
     );
     return (
       data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? ""
@@ -83,6 +113,7 @@ export async function complete(
       url,
       { Authorization: `Bearer ${cfg.apiKey}` },
       { model, messages, temperature, max_tokens: maxTokens },
+      timeoutMs,
     );
     return (data?.choices?.[0]?.message?.content ?? "").trim();
   }
@@ -100,6 +131,7 @@ export async function complete(
           stream: false,
           options: { temperature, num_predict: maxTokens },
         },
+        timeoutMs,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
@@ -161,6 +193,7 @@ export async function vision(
         ],
         generationConfig: { temperature: 0.2, maxOutputTokens: 512 },
       },
+      120_000,
     );
     return (
       data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? ""
@@ -184,6 +217,7 @@ export async function vision(
         ],
         max_tokens: 512,
       },
+      120_000,
     );
     return (data?.choices?.[0]?.message?.content ?? "").trim();
   }
@@ -199,6 +233,7 @@ export async function vision(
         messages: [{ role: "user", content: prompt, images: [imageBase64] }],
         options: { temperature: 0.2 },
       },
+      120_000,
     );
     return (data?.message?.content ?? "").trim();
   }

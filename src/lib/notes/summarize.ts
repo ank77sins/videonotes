@@ -36,6 +36,18 @@ function buildChunks(segments: TranscriptSegment[]): Chunk[] {
   return chunks;
 }
 
+const MAX_CHUNKS = 20;
+
+function limitChunks(chunks: Chunk[]): Chunk[] {
+  if (chunks.length <= MAX_CHUNKS) return chunks;
+  const step = (chunks.length - 1) / (MAX_CHUNKS - 1);
+  const picked: Chunk[] = [];
+  for (let i = 0; i < MAX_CHUNKS; i++) {
+    picked.push(chunks[Math.round(i * step)]);
+  }
+  return picked;
+}
+
 function safeJson<T>(raw: string): T | null {
   const cleaned = raw
     .replace(/^```(?:json)?/i, "")
@@ -257,19 +269,28 @@ export async function buildNotes(
   cfg: LlmConfig,
   onProgress?: (step: string, pct: number) => void,
 ): Promise<{ notes: NotesDocument; usedAi: boolean }> {
+  const fallback = () => extractiveNotes(segments, meta, options, slides);
+
   if (!isConfigured(cfg)) {
     onProgress?.("Summarizing transcript (basic mode)", 100);
-    return { notes: extractiveNotes(segments, meta, options, slides), usedAi: false };
+    return { notes: fallback(), usedAi: false };
   }
 
-  const chunks = buildChunks(segments);
-  onProgress?.("Summarizing transcript sections", 0);
-  const chunkNotes = await mapChunks(chunks, cfg, (done, total) =>
-    onProgress?.("Summarizing transcript sections", Math.round((done / total) * 100)),
-  );
+  try {
+    const chunks = limitChunks(buildChunks(segments));
+    onProgress?.("Summarizing transcript sections", 0);
+    const chunkNotes = await mapChunks(chunks, cfg, (done, total) =>
+      onProgress?.("Summarizing transcript sections", Math.round((done / total) * 100)),
+    );
 
-  onProgress?.("Writing final notes", 50);
-  const notes = await synthesize(chunkNotes, meta, options, slides, cfg);
-  onProgress?.("Writing final notes", 100);
-  return { notes, usedAi: true };
+    onProgress?.("Writing final notes", 50);
+    const notes = await synthesize(chunkNotes, meta, options, slides, cfg);
+    if (!notes.sections.length) throw new Error("The model returned no sections.");
+    onProgress?.("Writing final notes", 100);
+    return { notes, usedAi: true };
+  } catch (err) {
+    onProgress?.("Falling back to basic notes", 100);
+    const reason = err instanceof Error ? err.message : "The AI model failed.";
+    return { notes: { ...fallback(), warning: reason }, usedAi: false };
+  }
 }
