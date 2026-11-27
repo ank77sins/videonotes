@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: videonotes
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+    disk:
+      name: videonotes-data
+      mountPath: /app/data
+      sizeGB: 5
