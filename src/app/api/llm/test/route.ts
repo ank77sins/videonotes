@@ -15,7 +15,13 @@ export async function POST(req: Request) {
   }
 
   if (!isConfigured(cfg)) {
-    return NextResponse.json({ ok: false, error: "No provider configured." }, { status: 400 });
+    const message =
+      cfg.provider === "custom"
+        ? "Add your API base URL, key and model first."
+        : cfg.provider === "none"
+          ? "Choose a provider first."
+          : "Add your API key first.";
+    return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 
   try {

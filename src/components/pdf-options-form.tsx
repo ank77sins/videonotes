@@ -173,7 +173,7 @@ export function PdfOptionsForm({
           <span className="space-y-1">
             <span className="block text-sm font-medium">Slides &amp; visuals</span>
             <span className="block text-xs text-muted-foreground">
-              Capture frames and describe them. Slower.
+              Capture frames and describe them. Much slower — downloads the video.
             </span>
           </span>
         </label>

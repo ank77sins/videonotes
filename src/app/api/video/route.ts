@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import type { TranscriptSegment } from "@/lib/types";
+import type { TranscriptSegment, VideoMeta } from "@/lib/types";
+import { getCachedTranscript, saveCachedTranscript } from "@/lib/db";
 import { parseVideoId } from "@/lib/youtube/url";
 import { fetchMetadata } from "@/lib/youtube/metadata";
 import { fetchTranscript, parseSubtitles, segmentsToText } from "@/lib/youtube/transcript";
@@ -9,6 +10,13 @@ import { classifyYoutubeError } from "@/lib/youtube/errors";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+
+interface CachedVideo {
+  meta: VideoMeta;
+  source: string;
+  segments: TranscriptSegment[];
+  text: string;
+}
 
 function manualToSegments(raw: string): TranscriptSegment[] {
   const trimmed = raw.trim();
@@ -65,6 +73,21 @@ export async function POST(req: Request) {
 
   const cookies = writeTempCookies(body.cookies);
   try {
+    if (!body.manualTranscript?.trim()) {
+      const cached = getCachedTranscript<CachedVideo>(videoId);
+      if (cached?.segments?.length) {
+        return NextResponse.json({
+          ok: true,
+          meta: cached.meta,
+          source: cached.source,
+          hasTranscript: true,
+          segments: cached.segments,
+          text: cached.text,
+          cached: true,
+        });
+      }
+    }
+
     const meta = await fetchMetadata(videoId, cookies?.path);
 
     if (body.manualTranscript?.trim()) {
@@ -102,13 +125,16 @@ export async function POST(req: Request) {
       });
     }
 
+    const text = segmentsToText(segments);
+    saveCachedTranscript(videoId, { meta, source, segments, text });
+
     return NextResponse.json({
       ok: true,
       meta,
       source,
       hasTranscript: true,
       segments,
-      text: segmentsToText(segments),
+      text,
     });
   } catch (err) {
     const classified = classifyYoutubeError(err);

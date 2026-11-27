@@ -146,6 +146,11 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
             percentage can pause while the model writes.
           </p>
         ) : null}
+        {active && job.provider && job.provider !== "ollama" && job.provider !== "none" ? (
+          <p className="text-xs text-muted-foreground">
+            Running on a hosted model — this usually takes seconds.
+          </p>
+        ) : null}
         {active ? (
           <Button
             variant="ghost"

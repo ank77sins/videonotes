@@ -16,6 +16,21 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: "http://localhost:11434",
 };
 
+export const PROVIDER_BASE_URLS: Partial<Record<LlmProvider, string>> = {
+  groq: "https://api.groq.com/openai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  nvidia: "https://integrate.api.nvidia.com/v1",
+  ollama: "http://localhost:11434",
+};
+
+export const PROVIDER_MODELS: Partial<Record<LlmProvider, string>> = {
+  gemini: "gemini-2.0-flash",
+  groq: "llama-3.3-70b-versatile",
+  openrouter: "google/gemini-2.0-flash-exp:free",
+  nvidia: "meta/llama-3.3-70b-instruct",
+  ollama: "llama3.2:3b",
+};
+
 export function loadSettings(): Settings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
@@ -45,5 +60,8 @@ export function toLlmConfig(settings: Settings): LlmConfig {
 export function isAiEnabled(settings: Settings): boolean {
   if (settings.provider === "none") return false;
   if (settings.provider === "ollama") return true;
+  if (settings.provider === "custom") {
+    return Boolean(settings.apiKey.trim() && settings.baseUrl.trim());
+  }
   return Boolean(settings.apiKey.trim());
 }

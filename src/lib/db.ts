@@ -42,6 +42,11 @@ function createDb(): DB {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
+    CREATE TABLE IF NOT EXISTS transcript_cache (
+      video_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   const staleCutoff = Date.now() - STALE_AFTER_MS;
   db.prepare(
@@ -214,4 +219,37 @@ export function listJobs(limit = 50): JobRecord[] {
 
 export function deleteJobRow(id: string): void {
   db.prepare(`DELETE FROM jobs WHERE id = ?`).run(id);
+}
+
+const TRANSCRIPT_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function getCachedTranscript<T>(videoId: string, maxAgeMs = TRANSCRIPT_TTL_MS): T | null {
+  try {
+    const row = db
+      .prepare(`SELECT payload, created_at FROM transcript_cache WHERE video_id = ?`)
+      .get(videoId) as { payload: string; created_at: number } | undefined;
+    if (!row) return null;
+    if (Date.now() - row.created_at > maxAgeMs) {
+      db.prepare(`DELETE FROM transcript_cache WHERE video_id = ?`).run(videoId);
+      return null;
+    }
+    return JSON.parse(row.payload) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedTranscript(videoId: string, payload: unknown): void {
+  try {
+    db.prepare(
+      `INSERT INTO transcript_cache (video_id, payload, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(video_id) DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at`,
+    ).run(videoId, JSON.stringify(payload), Date.now());
+  } catch {
+    // cache is best-effort
+  }
+}
+
+export function clearTranscriptCache(): void {
+  db.prepare(`DELETE FROM transcript_cache`).run();
 }

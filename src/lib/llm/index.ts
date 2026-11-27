@@ -9,13 +9,34 @@ const DEFAULT_MODELS: Record<LlmProvider, string> = {
   gemini: "gemini-2.0-flash",
   groq: "llama-3.3-70b-versatile",
   openrouter: "google/gemini-2.0-flash-exp:free",
+  nvidia: "meta/llama-3.3-70b-instruct",
+  custom: "",
   ollama: "llama3.2:3b",
   none: "",
 };
 
+const OPENAI_COMPATIBLE_BASE: Partial<Record<LlmProvider, string>> = {
+  groq: "https://api.groq.com/openai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  nvidia: "https://integrate.api.nvidia.com/v1",
+};
+
+const OPENAI_COMPATIBLE: LlmProvider[] = ["groq", "openrouter", "nvidia", "custom"];
+
+function isOpenAiCompatible(provider: LlmProvider): boolean {
+  return OPENAI_COMPATIBLE.includes(provider);
+}
+
+export function openAiBase(cfg: LlmConfig): string {
+  const configured = cfg.baseUrl?.trim().replace(/\/$/, "");
+  if (configured) return configured.replace(/\/chat\/completions$/, "");
+  return OPENAI_COMPATIBLE_BASE[cfg.provider] ?? "";
+}
+
 export function isConfigured(cfg: LlmConfig | undefined): boolean {
   if (!cfg || cfg.provider === "none") return false;
   if (cfg.provider === "ollama") return true;
+  if (cfg.provider === "custom") return Boolean(cfg.apiKey && cfg.baseUrl?.trim());
   return Boolean(cfg.apiKey);
 }
 
@@ -26,6 +47,12 @@ export function resolveModel(cfg: LlmConfig): string {
 function assertConfigured(cfg: LlmConfig) {
   if (!isConfigured(cfg)) {
     throw new Error("No LLM provider configured.");
+  }
+  if (cfg.provider === "custom" && !cfg.baseUrl?.trim()) {
+    throw new Error("Set the API base URL for your custom provider.");
+  }
+  if (cfg.provider === "custom" && !cfg.model?.trim()) {
+    throw new Error("Set the model name for your custom provider.");
   }
   if (cfg.provider !== "ollama" && !cfg.apiKey) {
     throw new Error(`Missing API key for ${cfg.provider}.`);
@@ -104,13 +131,11 @@ export async function complete(
     ).trim();
   }
 
-  if (cfg.provider === "groq" || cfg.provider === "openrouter") {
-    const url =
-      cfg.provider === "groq"
-        ? "https://api.groq.com/openai/v1/chat/completions"
-        : "https://openrouter.ai/api/v1/chat/completions";
+  if (isOpenAiCompatible(cfg.provider)) {
+    const base = openAiBase(cfg);
+    if (!base) throw new Error(`No API base URL configured for ${cfg.provider}.`);
     const data = await postJson(
-      url,
+      `${base}/chat/completions`,
       { Authorization: `Bearer ${cfg.apiKey}` },
       { model, messages, temperature, max_tokens: maxTokens },
       timeoutMs,
@@ -205,9 +230,11 @@ export async function vision(
     ).trim();
   }
 
-  if (cfg.provider === "openrouter") {
+  if (isOpenAiCompatible(cfg.provider)) {
+    const base = openAiBase(cfg);
+    if (!base) throw new Error(`No API base URL configured for ${cfg.provider}.`);
     const data = await postJson(
-      "https://openrouter.ai/api/v1/chat/completions",
+      `${base}/chat/completions`,
       { Authorization: `Bearer ${cfg.apiKey}` },
       {
         model,

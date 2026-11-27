@@ -36,15 +36,33 @@ function buildChunks(segments: TranscriptSegment[]): Chunk[] {
   return chunks;
 }
 
-const MAX_CHUNKS = 8;
+const LOCAL_MAX_CHUNKS = 8;
+const CLOUD_MAX_CHUNKS = 12;
 const CHUNK_MAX_TOKENS = 400;
-const SINGLE_PASS_CHARS = 24000;
-const CHUNK_CONCURRENCY = 2;
+const LOCAL_SINGLE_PASS_CHARS = 24000;
+const CLOUD_SINGLE_PASS_CHARS = 90000;
+const LOCAL_CONCURRENCY = 2;
+const CLOUD_CONCURRENCY = 6;
 
-function mergeIntoFew(chunks: Chunk[]): Chunk[] {
-  if (chunks.length <= MAX_CHUNKS) return chunks;
-  const groups = MAX_CHUNKS;
-  const per = Math.ceil(chunks.length / groups);
+function isCloud(cfg: LlmConfig): boolean {
+  return cfg.provider !== "ollama" && cfg.provider !== "none";
+}
+
+function maxChunksFor(cfg: LlmConfig): number {
+  return isCloud(cfg) ? CLOUD_MAX_CHUNKS : LOCAL_MAX_CHUNKS;
+}
+
+function singlePassCharsFor(cfg: LlmConfig): number {
+  return isCloud(cfg) ? CLOUD_SINGLE_PASS_CHARS : LOCAL_SINGLE_PASS_CHARS;
+}
+
+function concurrencyFor(cfg: LlmConfig): number {
+  return isCloud(cfg) ? CLOUD_CONCURRENCY : LOCAL_CONCURRENCY;
+}
+
+function mergeIntoFew(chunks: Chunk[], maxChunks: number): Chunk[] {
+  if (chunks.length <= maxChunks) return chunks;
+  const per = Math.ceil(chunks.length / maxChunks);
   const out: Chunk[] = [];
   for (let i = 0; i < chunks.length; i += per) {
     const slice = chunks.slice(i, i + per);
@@ -135,7 +153,7 @@ async function mapChunks(
   };
 
   await Promise.all(
-    Array.from({ length: Math.min(CHUNK_CONCURRENCY, chunks.length) }, () => worker()),
+    Array.from({ length: Math.min(concurrencyFor(cfg), chunks.length) }, () => worker()),
   );
   return out;
 }
@@ -302,7 +320,7 @@ export async function buildNotes(
     const rawChunks = buildChunks(segments);
     const totalChars = segments.reduce((sum, s) => sum + s.text.length, 0);
 
-    if (totalChars <= SINGLE_PASS_CHARS) {
+    if (totalChars <= singlePassCharsFor(cfg)) {
       onProgress?.("Writing notes (single pass)", 10);
       const single = rawChunks.map((c) => c.text).join("\n").slice(0, MAX_TRANSCRIPT_CHARS);
       const notes = await synthesize([single], meta, options, slides, cfg);
@@ -311,7 +329,7 @@ export async function buildNotes(
       return { notes, usedAi: true };
     }
 
-    const chunks = mergeIntoFew(rawChunks);
+    const chunks = mergeIntoFew(rawChunks, maxChunksFor(cfg));
     onProgress?.(`Summarizing ${chunks.length} sections`, 0);
     const chunkNotes = await mapChunks(chunks, cfg, (done, total) =>
       onProgress?.(`Summarizing ${total} sections`, Math.round((done / total) * 100)),

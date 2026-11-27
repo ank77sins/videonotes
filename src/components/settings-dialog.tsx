@@ -19,24 +19,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DEFAULT_SETTINGS, toLlmConfig, type Settings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, PROVIDER_BASE_URLS, PROVIDER_MODELS, toLlmConfig, type Settings } from "@/lib/settings";
 import type { LlmProvider } from "@/lib/types";
 
 const PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
-  { value: "none", label: "No AI (basic mode)", hint: "Offline extractive summaries. No key needed." },
+  { value: "nvidia", label: "NVIDIA NIM (fastest)", hint: "Free API key from build.nvidia.com. Very fast hosted models." },
+  { value: "groq", label: "Groq (very fast)", hint: "Free API key from console.groq.com. Fastest hosted inference." },
   { value: "gemini", label: "Google Gemini", hint: "Free API key from Google AI Studio." },
-  { value: "groq", label: "Groq", hint: "Fast free-tier inference." },
   { value: "openrouter", label: "OpenRouter", hint: "Many models, some free." },
-  { value: "ollama", label: "Ollama (local)", hint: "Runs on your machine at localhost:11434." },
+  { value: "custom", label: "Custom / free LLM API", hint: "Any OpenAI-compatible endpoint: paste the base URL, key and model." },
+  { value: "ollama", label: "Ollama (local)", hint: "Runs on your machine. Slower on CPU, fully private." },
+  { value: "none", label: "No AI (basic mode)", hint: "Offline extractive summaries. No key needed." },
 ];
 
 const MODEL_HINTS: Record<LlmProvider, string> = {
   none: "",
-  gemini: "gemini-2.0-flash",
-  groq: "llama-3.3-70b-versatile",
-  openrouter: "google/gemini-2.0-flash-exp:free",
-  ollama: "llama3.2:3b",
+  gemini: PROVIDER_MODELS.gemini ?? "",
+  groq: PROVIDER_MODELS.groq ?? "",
+  openrouter: PROVIDER_MODELS.openrouter ?? "",
+  nvidia: PROVIDER_MODELS.nvidia ?? "",
+  custom: "model-name",
+  ollama: PROVIDER_MODELS.ollama ?? "",
 };
+
+function isCloudProvider(provider: LlmProvider): boolean {
+  return provider !== "none" && provider !== "ollama";
+}
 
 type TestState = { kind: "idle" } | { kind: "testing" } | { kind: "ok"; reply: string } | { kind: "error"; error: string };
 
@@ -141,7 +149,15 @@ export function SettingsDialog({
             <Label htmlFor="provider">Provider</Label>
             <Select
               value={draft.provider}
-              onValueChange={(v) => setDraft({ ...draft, provider: v as LlmProvider })}
+              onValueChange={(v) => {
+                const next = v as LlmProvider;
+                setDraft({
+                  ...draft,
+                  provider: next,
+                  baseUrl: PROVIDER_BASE_URLS[next] ?? (next === "custom" ? draft.baseUrl : ""),
+                  model: "",
+                });
+              }}
             >
               <SelectTrigger id="provider">
                 <SelectValue />
@@ -188,10 +204,29 @@ export function SettingsDialog({
             </div>
           ) : null}
 
+          {draft.provider === "custom" ? (
+            <div className="space-y-2">
+              <Label htmlFor="baseUrl">API base URL</Label>
+              <Input
+                id="baseUrl"
+                type="url"
+                placeholder="https://api.example.com/v1"
+                value={draft.baseUrl}
+                onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Any [OI]-compatible endpoint. Usually ends in <code>/v1</code>.
+              </p>
+            </div>
+          ) : null}
+
           {draft.provider !== "none" ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="model">Model {draft.provider === "ollama" ? "" : "(optional)"}</Label>
+                <Label htmlFor="model">
+                  Model{" "}
+                  {draft.provider === "ollama" || draft.provider === "custom" ? "" : "(optional)"}
+                </Label>
                 {draft.provider === "ollama" ? (
                   <button
                     type="button"

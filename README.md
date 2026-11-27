@@ -34,11 +34,27 @@ Open **http://localhost:3000** → paste a YouTube link → done.
 
 ---
 
-## Optional: private, fully-offline AI notes
+## AI notes — pick your speed
 
-Without any setup the app already writes solid notes using a built-in extractive
-summarizer. For genuinely AI-written notes with **zero data leaving your machine**,
-install [Ollama](https://ollama.com/download) and pull a model:
+Without any setup the app writes solid notes using a built-in extractive summarizer.
+For AI-written notes, open **Settings** and pick a provider.
+
+### Fastest: hosted models (seconds)
+
+| Provider | Key from | Why |
+| --- | --- | --- |
+| **NVIDIA NIM** | [build.nvidia.com](https://build.nvidia.com) | Very fast hosted models, generous free tier |
+| **Groq** | [console.groq.com](https://console.groq.com) | Fastest hosted inference available |
+| **Google Gemini** | [aistudio.google.com](https://aistudio.google.com) | Free, long context |
+| **OpenRouter** | [openrouter.ai](https://openrouter.ai) | Many models, some free |
+| **Custom / free LLM API** | your provider | Any [OI]-compatible endpoint: base URL + key + model |
+
+Hosted providers process transcript sections **6 at a time** and handle the whole
+transcript in a single pass, so a 20-minute video typically finishes in **10–30 seconds**.
+
+### Private: local with Ollama (minutes)
+
+Everything stays on your machine. Install [Ollama](https://ollama.com/download):
 
 ```bash
 ollama pull llama3.2:3b      # ~2 GB, runs on 8 GB RAM laptops
@@ -48,18 +64,22 @@ ollama serve                 # usually already running
 In the app: **Settings → Provider → Ollama (local)** — the model dropdown lists
 whatever you have installed. Click **Test connection** to confirm.
 
-### Which model?
-
 | Model | Download | RAM to run | Notes |
 | --- | --- | --- | --- |
 | `llama3.2:1b` | ~1.3 GB | 4 GB | Fastest, weakest |
 | `llama3.2:3b` | ~2 GB | 8 GB | Good default for small laptops |
-| **`qwen2.5:7b`** | **~4.7 GB** | **12–16 GB** | **Best pick if you have 16 GB** — strongest at strict JSON and structured notes |
-| `llama3.1:8b` | ~4.9 GB | 16 GB | Good all-rounder, slightly weaker at strict JSON |
+| **`qwen2.5:7b`** | **~4.7 GB** | **12–16 GB** | **Best pick if you have 16 GB** — strongest at strict JSON |
+| `llama3.1:8b` | ~4.9 GB | 16 GB | Good all-rounder |
 | `mistral` | ~4.1 GB | 12 GB | Fast, older |
 
 **Skip vision models** (`llava`, `qwen2.5vl`). Slide captions are built from OCR text,
 so a vision model costs several GB for little benefit.
+
+Check whether Ollama is using your GPU:
+
+```bash
+ollama ps        # PROCESSOR column: 100% GPU = fast, 100% CPU = slow
+```
 
 ### Switching or removing models
 
@@ -70,12 +90,6 @@ ollama rm llama3.2:3b        # delete the old one to free disk space
 ```
 
 Then in the app: **Settings → Ollama → Refresh list → pick the new model → Save**.
-Deleting a model does not affect the app until you select a different one.
-
-### Prefer a cloud model?
-
-Free API keys also work — Gemini, Groq, or OpenRouter. Add one in **Settings**.
-Those requests do leave your machine (to that provider only).
 
 ---
 

@@ -1,4 +1,11 @@
-export type LlmProvider = "gemini" | "groq" | "openrouter" | "ollama" | "none";
+export type LlmProvider =
+  | "gemini"
+  | "groq"
+  | "openrouter"
+  | "nvidia"
+  | "custom"
+  | "ollama"
+  | "none";
 
 export interface LlmConfig {
   provider: LlmProvider;
@@ -29,7 +36,7 @@ export const DEFAULT_OPTIONS: PdfOptions = {
   depth: "standard",
   language: "English",
   tone: "neutral",
-  includeSlides: true,
+  includeSlides: false,
   includeTimestamps: true,
   includeTranscript: true,
   style: "notes",
