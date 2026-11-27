@@ -1,0 +1,121 @@
+import { NextResponse } from "next/server";
+import type { TranscriptSegment } from "@/lib/types";
+import { parseVideoId } from "@/lib/youtube/url";
+import { fetchMetadata } from "@/lib/youtube/metadata";
+import { fetchTranscript, parseSubtitles, segmentsToText } from "@/lib/youtube/transcript";
+import { writeTempCookies } from "@/lib/youtube/cookies";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
+
+function manualToSegments(raw: string): TranscriptSegment[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (/-->/.test(trimmed) || /<text|<transcript/i.test(trimmed)) {
+    return parseSubtitles(trimmed);
+  }
+  const sentences = trimmed
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const segments: TranscriptSegment[] = [];
+  let buffer: string[] = [];
+  let words = 0;
+  const WPS = 2.6;
+  let cumulative = 0;
+  for (const sentence of sentences) {
+    buffer.push(sentence);
+    words += sentence.split(/\s+/).length;
+    if (words >= 18) {
+      const text = buffer.join(" ");
+      const dur = Math.max(2, words / WPS);
+      segments.push({ start: cumulative, duration: dur, text });
+      cumulative += dur;
+      buffer = [];
+      words = 0;
+    }
+  }
+  if (buffer.length) {
+    const text = buffer.join(" ");
+    const dur = Math.max(2, words / WPS);
+    segments.push({ start: cumulative, duration: dur, text });
+  }
+  return segments;
+}
+
+export async function POST(req: Request) {
+  let body: { url?: string; cookies?: string; manualTranscript?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
+  }
+
+  const url = body.url?.trim() ?? "";
+  const videoId = parseVideoId(url);
+  if (!videoId) {
+    return NextResponse.json(
+      { ok: false, error: "That doesn't look like a valid YouTube link or video ID." },
+      { status: 400 },
+    );
+  }
+
+  const cookies = writeTempCookies(body.cookies);
+  try {
+    const meta = await fetchMetadata(videoId, cookies?.path);
+
+    if (body.manualTranscript?.trim()) {
+      const segments = manualToSegments(body.manualTranscript);
+      if (!segments.length) {
+        return NextResponse.json(
+          { ok: false, error: "Could not read any text from the pasted transcript." },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        meta,
+        source: "manual",
+        hasTranscript: true,
+        segments,
+        text: segmentsToText(segments),
+      });
+    }
+
+    const { segments, source } = await fetchTranscript(videoId, cookies?.path);
+
+    if (!segments.length) {
+      return NextResponse.json({
+        ok: true,
+        meta,
+        source,
+        hasTranscript: false,
+        segments: [],
+        text: "",
+        reason:
+          "YouTube blocked automatic caption access from this server. Paste the transcript, or upload an .srt/.vtt file, or provide cookies to continue.",
+      });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      meta,
+      source,
+      hasTranscript: true,
+      segments,
+      text: segmentsToText(segments),
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : "Failed to load video information.",
+      },
+      { status: 500 },
+    );
+  } finally {
+    cookies?.cleanup();
+  }
+}

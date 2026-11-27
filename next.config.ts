@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
     ],
   },
   allowedDevOrigins: ['*'],
+  serverExternalPackages: [
+    'better-sqlite3',
+    'tesseract.js',
+    'ffmpeg-static',
+    'fluent-ffmpeg',
+    'youtube-dl-exec',
+    'pdfkit',
+    'sharp',
+  ],
   typescript: {
     ignoreBuildErrors: true,
   },
