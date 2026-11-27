@@ -38,23 +38,39 @@ Open **http://localhost:3000** → paste a YouTube link → done.
 
 Without any setup the app already writes solid notes using a built-in extractive
 summarizer. For genuinely AI-written notes with **zero data leaving your machine**,
-install [Ollama](https://ollama.com/download) and pull a small model:
+install [Ollama](https://ollama.com/download) and pull a model:
 
 ```bash
 ollama pull llama3.2:3b      # ~2 GB, runs on 8 GB RAM laptops
 ollama serve                 # usually already running
 ```
 
-In the app: **Settings → Provider → Ollama (local)**, model `llama3.2:3b`.
+In the app: **Settings → Provider → Ollama (local)** — the model dropdown lists
+whatever you have installed. Click **Test connection** to confirm.
 
-Larger models give better notes if your machine can handle them:
+### Which model?
 
-| Model | Size | Needs |
-| --- | --- | --- |
-| `llama3.2:1b` | ~1.3 GB | 4 GB RAM, fast |
-| `llama3.2:3b` | ~2 GB | 8 GB RAM — good default |
-| `qwen2.5:7b` | ~4.7 GB | 16 GB RAM, best quality |
-| `mistral` | ~4 GB | 16 GB RAM |
+| Model | Download | RAM to run | Notes |
+| --- | --- | --- | --- |
+| `llama3.2:1b` | ~1.3 GB | 4 GB | Fastest, weakest |
+| `llama3.2:3b` | ~2 GB | 8 GB | Good default for small laptops |
+| **`qwen2.5:7b`** | **~4.7 GB** | **12–16 GB** | **Best pick if you have 16 GB** — strongest at strict JSON and structured notes |
+| `llama3.1:8b` | ~4.9 GB | 16 GB | Good all-rounder, slightly weaker at strict JSON |
+| `mistral` | ~4.1 GB | 12 GB | Fast, older |
+
+**Skip vision models** (`llava`, `qwen2.5vl`). Slide captions are built from OCR text,
+so a vision model costs several GB for little benefit.
+
+### Switching or removing models
+
+```bash
+ollama list                  # see what's installed
+ollama pull qwen2.5:7b       # download a better one (old one stays)
+ollama rm llama3.2:3b        # delete the old one to free disk space
+```
+
+Then in the app: **Settings → Ollama → Refresh list → pick the new model → Save**.
+Deleting a model does not affect the app until you select a different one.
 
 ### Prefer a cloud model?
 
