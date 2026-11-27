@@ -27,6 +27,61 @@ export interface StartJobInput {
   cookies?: string;
 }
 
+const MAX_CONCURRENT = 2;
+
+export class CancelledError extends Error {
+  constructor() {
+    super("Job cancelled.");
+    this.name = "CancelledError";
+  }
+}
+
+const globalForJobs = globalThis as unknown as {
+  __ytpdfCancelled?: Set<string>;
+  __ytpdfRunning?: number;
+  __ytpdfQueue?: (() => void)[];
+};
+
+const cancelled: Set<string> = globalForJobs.__ytpdfCancelled ?? new Set();
+globalForJobs.__ytpdfCancelled = cancelled;
+
+const queue: (() => void)[] = globalForJobs.__ytpdfQueue ?? [];
+globalForJobs.__ytpdfQueue = queue;
+
+let running: number = globalForJobs.__ytpdfRunning ?? 0;
+
+export function cancelJob(id: string): boolean {
+  cancelled.add(id);
+  return true;
+}
+
+export function isCancelled(id: string): boolean {
+  return cancelled.has(id);
+}
+
+function checkCancelled(id: string): void {
+  if (cancelled.has(id)) throw new CancelledError();
+}
+
+function acquire(): Promise<void> {
+  if (running < MAX_CONCURRENT) {
+    running++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    queue.push(() => {
+      running++;
+      resolve();
+    });
+  });
+}
+
+function release(): void {
+  running = Math.max(0, running - 1);
+  const next = queue.shift();
+  if (next) next();
+}
+
 export function startJob(input: StartJobInput): string {
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -52,22 +107,51 @@ export function startJob(input: StartJobInput): string {
   };
   insertJob(record);
 
-  void runJob(id, input).catch((err) => {
-    updateJob(id, {
-      status: "error",
-      step: "Failed",
-      error: err instanceof Error ? err.message : "Unknown error",
-      message: null,
-    });
-  });
+  void (async () => {
+    await acquire();
+    try {
+      checkCancelled(id);
+      updateJob(id, { status: "running", step: "Starting", progress: 1 });
+      await runJob(id, input);
+    } catch (err) {
+      if (err instanceof CancelledError) {
+        updateJob(id, {
+          status: "cancelled",
+          step: "Cancelled",
+          error: null,
+          message: null,
+        });
+      } else {
+        updateJob(id, {
+          status: "error",
+          step: "Failed",
+          error: err instanceof Error ? err.message : "Unknown error",
+          message: null,
+        });
+      }
+      cleanupWorkDir(id);
+    } finally {
+      cancelled.delete(id);
+      release();
+    }
+  })();
 
   return id;
+}
+
+function cleanupWorkDir(id: string): void {
+  try {
+    fs.rmSync(path.join(FRAME_DIR, id), { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
 }
 
 async function runJob(id: string, input: StartJobInput): Promise<void> {
   const { meta, segments, options, llm } = input;
 
   const progress = (pct: number, step: string, message?: string) => {
+    checkCancelled(id);
     updateJob(id, {
       status: pct >= 100 ? "done" : "running",
       progress: Math.min(100, Math.round(pct)),
@@ -92,14 +176,17 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
         cookies?.path,
       );
 
+      checkCancelled(id);
       progress(22, "Detecting slides", "Finding slide changes");
       const frames = await extractFramesToDir(videoPath, path.join(workDir, "frames"), {
         maxFrames: 120,
       });
 
+      checkCancelled(id);
       progress(34, "Removing duplicates", `Comparing ${frames.length} frames`);
       const unique = await dedupeFrames(frames, { maxKeep: 60 });
 
+      checkCancelled(id);
       progress(40, "Reading slide text", `OCR on ${unique.length} slides`);
       const ocrTexts = await ocrFrames(
         unique.map((f) => f.path),
@@ -117,12 +204,14 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
       let captions: string[] = baseSlides.map(() => "");
       if (llm.provider === "ollama" || (llm.provider !== "none" && llm.apiKey)) {
         try {
+          checkCancelled(id);
           captions = await captionSlides(
             baseSlides.map((s) => ({ path: s.imagePath, ocrText: s.ocrText, timestamp: s.timestamp })),
             llm,
             (done, total) => progress(60 + (done / Math.max(1, total)) * 15, "Describing slides"),
           );
-        } catch {
+        } catch (err) {
+          if (err instanceof CancelledError) throw err;
           // captions are optional
         }
       }
@@ -135,17 +224,20 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
         // ignore
       }
     } catch (err) {
+      if (err instanceof CancelledError) throw err;
       progress(70, "Skipping slides", err instanceof Error ? err.message : "Slide capture failed");
     } finally {
       cookies?.cleanup();
     }
   }
 
+  checkCancelled(id);
   progress(72, "Writing notes", "Summarizing the transcript");
   const { notes, usedAi } = await buildNotes(segments, meta, options, slides, llm, (step, pct) =>
     progress(72 + pct * 0.18, step),
   );
 
+  checkCancelled(id);
   progress(92, "Building PDF", "Laying out your document");
   const outPath = path.join(PDF_DIR, `${id}.pdf`);
   await renderPdf({
@@ -160,10 +252,5 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
 
   updateJob(id, { pdfPath: outPath, status: "done", progress: 100, step: "Done", message: null });
   void terminateOcr();
-
-  try {
-    fs.rmSync(path.join(FRAME_DIR, id), { recursive: true, force: true });
-  } catch {
-    // best effort cleanup
-  }
+  cleanupWorkDir(id);
 }

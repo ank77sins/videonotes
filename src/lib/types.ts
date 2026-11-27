@@ -73,7 +73,7 @@ export interface NotesDocument {
   questions?: { q: string; a: string }[];
 }
 
-export type JobStatus = "queued" | "running" | "done" | "error";
+export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
 export interface JobRecord {
   id: string;

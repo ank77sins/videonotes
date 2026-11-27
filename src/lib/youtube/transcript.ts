@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { TranscriptSegment } from "../types";
+import { classifyYoutubeError, withRetry, type ClassifiedError } from "./errors";
 import { canonicalUrl } from "./url";
 import { ytdlpRun } from "./ytdlp";
 
@@ -138,18 +139,33 @@ async function fromYtdlp(videoId: string, cookiesPath?: string): Promise<Transcr
 export async function fetchTranscript(
   videoId: string,
   cookiesPath?: string,
-): Promise<{ segments: TranscriptSegment[]; source: "youtube" | "ytdlp" | "none" }> {
+): Promise<{ segments: TranscriptSegment[]; source: "youtube" | "ytdlp" | "none"; error?: ClassifiedError }> {
+  let lastError: unknown;
+
   try {
-    const segs = dedupeSegments(await fromYoutubeTranscript(videoId));
+    const segs = dedupeSegments(
+      await withRetry(() => fromYoutubeTranscript(videoId), { attempts: 3, baseDelayMs: 600 }),
+    );
     if (segs.length) return { segments: segs, source: "youtube" };
-  } catch {
-    // fall through
+  } catch (err) {
+    lastError = err;
   }
+
   try {
-    const segs = dedupeSegments(await fromYtdlp(videoId, cookiesPath));
+    const segs = dedupeSegments(
+      await withRetry(() => fromYtdlp(videoId, cookiesPath), {
+        attempts: cookiesPath ? 2 : 3,
+        baseDelayMs: 900,
+      }),
+    );
     if (segs.length) return { segments: segs, source: "ytdlp" };
-  } catch {
-    // fall through
+  } catch (err) {
+    lastError = err;
   }
-  return { segments: [], source: "none" };
+
+  return {
+    segments: [],
+    source: "none",
+    error: lastError ? classifyYoutubeError(lastError) : undefined,
+  };
 }

@@ -93,7 +93,7 @@ export default function Home() {
           </Link>
           <div className="flex items-center gap-1">
             <Button asChild variant="ghost" size="sm" className="gap-2">
-              <Link href="/history">
+              <Link href="/history" aria-label="PDF history">
                 <History className="size-4" aria-hidden />
                 <span className="hidden sm:inline">History</span>
               </Link>
@@ -102,6 +102,7 @@ export default function Home() {
               variant="ghost"
               size="sm"
               className="gap-2"
+              aria-label="AI settings"
               onClick={() => setSettingsOpen(true)}
             >
               <SettingsIcon className="size-4" aria-hidden />

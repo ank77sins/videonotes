@@ -203,8 +203,8 @@ function extractiveNotes(
   }
 
   const norm = (t: string) => t.toLowerCase().replace(/\W+/g, " ").trim();
-  const seen = new Set<string>();
-  const uniquePoints = (items: string[]) => {
+  const dedupeWithin = (items: string[]) => {
+    const seen = new Set<string>();
     const out: string[] = [];
     for (const item of items) {
       const key = norm(item);
@@ -217,11 +217,21 @@ function extractiveNotes(
 
   const summary =
     extractiveSummary(fullText, options.depth === "brief" ? 4 : 7) || `Notes for ${meta.title}.`;
-  const keyTakeaways = uniquePoints(extractiveKeyPoints(fullText, 8));
-  const dedupedSections = sections.map((section) => ({
-    ...section,
-    bullets: uniquePoints(section.bullets),
-  })).filter((section) => section.bullets.length > 0);
+  const keyTakeaways = dedupeWithin(extractiveKeyPoints(fullText, 8));
+  const dedupedSections = sections
+    .map((section) => {
+      const bullets = dedupeWithin(section.bullets);
+      return {
+        ...section,
+        bullets: bullets.length ? bullets : section.bullets.slice(0, 1),
+      };
+    })
+    .filter((section) => section.bullets.length > 0);
+
+  if (!dedupedSections.length) {
+    const fallback = dedupeWithin(extractiveKeyPoints(fullText, 6));
+    if (fallback.length) dedupedSections.push({ heading: "Overview", bullets: fallback });
+  }
 
   const questions =
     options.style === "qa"

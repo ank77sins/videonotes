@@ -20,6 +20,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { JobView } from "@/lib/types";
 
+const STATUS_LABEL: Record<JobView["status"], string> = {
+  queued: "Queued",
+  running: "Working",
+  done: "Ready",
+  error: "Failed",
+  cancelled: "Cancelled",
+};
+
 export default function HistoryPage() {
   const [jobs, setJobs] = useState<JobView[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,14 +132,32 @@ export default function HistoryPage() {
                     <div className="min-w-0 space-y-1">
                       <div className="flex items-center gap-2">
                         <p className="truncate font-medium">{job.title ?? "Untitled video"}</p>
-                        <Badge variant={job.status === "done" ? "default" : job.status === "error" ? "destructive" : "secondary"}>
-                          {job.status}
+                        <Badge
+                          variant={
+                            job.status === "done"
+                              ? "default"
+                              : job.status === "error"
+                                ? "destructive"
+                                : "secondary"
+                          }
+                        >
+                          {STATUS_LABEL[job.status]}
                         </Badge>
                       </div>
                       <p className="truncate text-sm text-muted-foreground">
                         {job.channel ?? "Unknown channel"} · {format(job.createdAt, "d MMM yyyy, HH:mm")}
                         {job.slidesCount > 0 ? ` · ${job.slidesCount} slides` : ""}
                       </p>
+                      {job.status === "running" || job.status === "queued" ? (
+                        <p className="text-xs text-muted-foreground">
+                          {job.step ?? "Working"} · {job.progress}%
+                        </p>
+                      ) : null}
+                      {job.status === "cancelled" ? (
+                        <p className="text-xs text-muted-foreground">
+                          You cancelled this one. Generate it again to get the PDF.
+                        </p>
+                      ) : null}
                       {job.error ? <p className="text-xs text-destructive">{job.error}</p> : null}
                     </div>
 
@@ -172,10 +198,11 @@ export default function HistoryPage() {
       <AlertDialog open={Boolean(pendingDelete)} onOpenChange={(o) => !o && setPendingDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this PDF?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this item?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{pendingDelete?.title ?? "This item"}&rdquo; and its file will be permanently
-              removed. This can&apos;t be undone.
+              &ldquo;{pendingDelete?.title ?? "This item"}&rdquo;
+              {pendingDelete?.hasPdf ? " and its PDF" : ""} will be permanently removed. This
+              can&apos;t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

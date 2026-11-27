@@ -4,6 +4,7 @@ import { parseVideoId } from "@/lib/youtube/url";
 import { fetchMetadata } from "@/lib/youtube/metadata";
 import { fetchTranscript, parseSubtitles, segmentsToText } from "@/lib/youtube/transcript";
 import { writeTempCookies } from "@/lib/youtube/cookies";
+import { classifyYoutubeError } from "@/lib/youtube/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { segments, source } = await fetchTranscript(videoId, cookies?.path);
+    const { segments, source, error } = await fetchTranscript(videoId, cookies?.path);
 
     if (!segments.length) {
       return NextResponse.json({
@@ -94,8 +95,10 @@ export async function POST(req: Request) {
         hasTranscript: false,
         segments: [],
         text: "",
-        reason:
-          "YouTube blocked automatic caption access from this server. Paste the transcript, or upload an .srt/.vtt file, or provide cookies to continue.",
+        reason: error
+          ? `${error.message} ${error.guidance}`
+          : "YouTube didn't return captions for this video. Paste the transcript, or upload an .srt/.vtt file, or add cookies to continue.",
+        errorKind: error?.kind ?? "unknown",
       });
     }
 
@@ -108,10 +111,13 @@ export async function POST(req: Request) {
       text: segmentsToText(segments),
     });
   } catch (err) {
+    const classified = classifyYoutubeError(err);
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Failed to load video information.",
+        errorKind: classified.kind,
+        guidance: classified.guidance,
+        error: `${classified.message} ${classified.guidance}`,
       },
       { status: 500 },
     );

@@ -15,6 +15,8 @@ type DB = Database.Database;
 
 const globalForDb = globalThis as unknown as { __ytpdfDb?: DB };
 
+const STALE_AFTER_MS = 3 * 60 * 1000;
+
 function createDb(): DB {
   const db = new Database(path.join(DATA_DIR, "app.db"));
   db.pragma("journal_mode = WAL");
@@ -41,14 +43,15 @@ function createDb(): DB {
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
   `);
+  const staleCutoff = Date.now() - STALE_AFTER_MS;
   db.prepare(
     `UPDATE jobs
         SET status = 'error',
             step = 'Interrupted',
             error = COALESCE(error, 'The server restarted before this job finished. Please generate it again.'),
             updated_at = ?
-      WHERE status IN ('queued', 'running')`,
-  ).run(Date.now());
+      WHERE status IN ('queued', 'running') AND updated_at < ?`,
+  ).run(Date.now(), staleCutoff);
   sweepOldFrames();
   return db;
 }

@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, ExternalLink, Loader2, RotateCcw, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Loader2,
+  RotateCcw,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { JobView } from "@/lib/types";
@@ -19,6 +28,7 @@ const PHASES = [
 export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () => void }) {
   const [job, setJob] = useState<JobView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +82,20 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
 
   const done = job.status === "done";
   const failed = job.status === "error";
+  const cancelledState = job.status === "cancelled";
+  const active = !done && !failed && !cancelledState;
+
+  const cancel = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" });
+      if (!res.ok) toast.error("Could not cancel the job.");
+    } catch {
+      toast.error("Network error while cancelling.");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -84,22 +108,43 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           {failed ? (
             <TriangleAlert className="size-4 text-destructive" aria-hidden />
+          ) : cancelledState ? (
+            <XCircle className="size-4 text-muted-foreground" aria-hidden />
           ) : done ? (
             <CheckCircle2 className="size-4 text-emerald-600" aria-hidden />
           ) : (
             <Loader2 className="size-4 animate-spin" aria-hidden />
           )}
-          {failed ? "Generation failed" : done ? "Your PDF is ready" : (job.step ?? "Working")}
-          {!done && !failed && job.message ? ` — ${job.message}` : ""}
+          {failed
+            ? "Generation failed"
+            : cancelledState
+              ? "Cancelled"
+              : done
+                ? "Your PDF is ready"
+                : (job.step ?? "Working")}
+          {active && job.message ? ` — ${job.message}` : ""}
         </p>
+        {active ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void cancel()}
+            disabled={cancelling}
+            className="h-auto gap-2 px-0 text-muted-foreground"
+          >
+            {cancelling ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            {cancelling ? "Cancelling…" : "Cancel"}
+          </Button>
+        ) : null}
       </div>
 
       <ol className="space-y-2">
         {PHASES.map((phase) => {
-          const complete = job.progress >= phase.at && !failed;
-          const active =
+          const complete = job.progress >= phase.at && !failed && !cancelledState;
+          const phaseActive =
             !done &&
             !failed &&
+            !cancelledState &&
             job.progress < phase.at &&
             job.progress >= (PHASES[PHASES.indexOf(phase) - 1]?.at ?? 0);
           return (
@@ -108,20 +153,20 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
                 className={
                   complete
                     ? "text-emerald-600"
-                    : active
+                    : phaseActive
                       ? "text-foreground"
                       : "text-muted-foreground/60"
                 }
               >
                 {complete ? (
                   <CheckCircle2 className="size-4" aria-hidden />
-                ) : active ? (
+                ) : phaseActive ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
                 ) : (
                   <span className="inline-block size-4 rounded-full border" aria-hidden />
                 )}
               </span>
-              <span className={complete || active ? "" : "text-muted-foreground/60"}>
+              <span className={complete || phaseActive ? "" : "text-muted-foreground/60"}>
                 {phase.label}
                 {phase.label === "Capturing slides" && job.slidesCount > 0
                   ? ` · ${job.slidesCount} slides`
@@ -131,6 +176,18 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
           );
         })}
       </ol>
+
+      {cancelledState ? (
+        <div className="space-y-3 rounded-lg border bg-muted/40 p-3 text-sm">
+          <p className="text-muted-foreground">
+            You cancelled this job. Nothing was saved.
+          </p>
+          <Button variant="outline" onClick={onReset} className="gap-2">
+            <RotateCcw className="size-4" aria-hidden />
+            Start again
+          </Button>
+        </div>
+      ) : null}
 
       {failed ? (
         <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">

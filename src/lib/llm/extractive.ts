@@ -20,8 +20,20 @@ function tokenize(text: string): string[] {
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
+function uniqueSentences(sentences: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of sentences) {
+    const key = s.toLowerCase().replace(/\W+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 export function rankSentences(text: string): { sentence: string; score: number }[] {
-  const sentences = splitSentences(text);
+  const sentences = uniqueSentences(splitSentences(text));
   if (sentences.length === 0) return [];
 
   const freq = new Map<string, number>();
