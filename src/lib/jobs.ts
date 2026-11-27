@@ -160,4 +160,10 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
 
   updateJob(id, { pdfPath: outPath, status: "done", progress: 100, step: "Done", message: null });
   void terminateOcr();
+
+  try {
+    fs.rmSync(path.join(FRAME_DIR, id), { recursive: true, force: true });
+  } catch {
+    // best effort cleanup
+  }
 }

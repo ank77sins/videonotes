@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
-import { deleteJobRow, getJobRow } from "@/lib/db";
+import path from "node:path";
+import { FRAME_DIR, deleteJobRow, getJobRow } from "@/lib/db";
 import type { JobView } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -45,6 +46,11 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
     } catch {
       // ignore
     }
+  }
+  try {
+    fs.rmSync(path.join(FRAME_DIR, id), { recursive: true, force: true });
+  } catch {
+    // ignore
   }
   deleteJobRow(id);
   return NextResponse.json({ ok: true });

@@ -41,7 +41,35 @@ function createDb(): DB {
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
   `);
+  db.prepare(
+    `UPDATE jobs
+        SET status = 'error',
+            step = 'Interrupted',
+            error = COALESCE(error, 'The server restarted before this job finished. Please generate it again.'),
+            updated_at = ?
+      WHERE status IN ('queued', 'running')`,
+  ).run(Date.now());
+  sweepOldFrames();
   return db;
+}
+
+function sweepOldFrames(): void {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  try {
+    for (const entry of fs.readdirSync(FRAME_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(FRAME_DIR, entry.name);
+      try {
+        if (fs.statSync(full).mtimeMs < cutoff) {
+          fs.rmSync(full, { recursive: true, force: true });
+        }
+      } catch {
+        // ignore individual failures
+      }
+    }
+  } catch {
+    // frames dir may not exist yet
+  }
 }
 
 export const db: DB = globalForDb.__ytpdfDb ?? createDb();
