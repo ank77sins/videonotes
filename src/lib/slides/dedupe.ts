@@ -1,47 +1,47 @@
 import sharp from "sharp";
 import type { RawFrame } from "./frames";
 
-async function averageHash(file: string): Promise<number[]> {
+async function signature(file: string): Promise<number[]> {
   const { data } = await sharp(file)
     .resize(8, 8, { fit: "fill" })
-    .grayscale()
+    .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const avg = data.reduce((a, b) => a + b, 0) / data.length;
-  return Array.from(data).map((v) => (v >= avg ? 1 : 0));
+  return Array.from(data);
 }
 
-function hamming(a: number[], b: number[]): number {
-  let d = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
-  return d;
+function distance(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 255;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / a.length;
 }
 
 export async function dedupeFrames(
   frames: RawFrame[],
-  opts: { minDistance?: number; maxKeep?: number } = {},
+  opts: { threshold?: number; maxKeep?: number } = {},
 ): Promise<RawFrame[]> {
-  const minDistance = opts.minDistance ?? 6;
+  const threshold = opts.threshold ?? 14;
   const maxKeep = opts.maxKeep ?? 60;
   if (frames.length === 0) return [];
 
-  const hashes: number[][] = [];
+  const sigs: number[][] = [];
   for (const frame of frames) {
     try {
-      hashes.push(await averageHash(frame.path));
+      sigs.push(await signature(frame.path));
     } catch {
-      hashes.push([]);
+      sigs.push([]);
     }
   }
 
   const kept: RawFrame[] = [];
-  let lastHash: number[] | null = null;
+  let last: number[] | null = null;
 
   for (let i = 0; i < frames.length; i++) {
-    const h = hashes[i];
-    if (!lastHash || h.length === 0 || hamming(h, lastHash) >= minDistance) {
+    const sig = sigs[i];
+    if (!last || sig.length === 0 || distance(sig, last) >= threshold) {
       kept.push(frames[i]);
-      lastHash = h.length ? h : lastHash;
+      if (sig.length) last = sig;
     }
   }
 

@@ -2,6 +2,7 @@ import ffmpeg from "fluent-ffmpeg";
 import ffmpegPath from "ffmpeg-static";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath as unknown as string);
 
@@ -18,14 +19,56 @@ function listFrames(dir: string, prefix: string): string[] {
     .sort();
 }
 
+export function probeDuration(videoPath: string): Promise<number> {
+  if (!ffmpegPath) return Promise.resolve(0);
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath as unknown as string, ["-hide_banner", "-i", videoPath]);
+    let seconds = 0;
+    let buffer = "";
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const m = /Duration:\s*(\d+):(\d+):(\d+\.?\d*)/.exec(buffer);
+      if (m && seconds === 0) {
+        seconds = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+      }
+    };
+    proc.stderr.on("data", onData);
+    proc.on("error", () => resolve(seconds));
+    proc.on("close", () => resolve(seconds));
+  });
+}
+
+function capture(
+  videoPath: string,
+  outDir: string,
+  prefix: string,
+  filter: string,
+  maxFrames: number,
+  onStderr?: (line: string) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(videoPath)
+      .outputOptions(["-vf", filter, "-vsync", "vfr", "-frames:v", String(maxFrames), "-q:v", "3"])
+      .output(path.join(outDir, `${prefix}-%04d.jpg`));
+    if (onStderr) cmd.on("stderr", onStderr);
+    cmd
+      .on("end", () => resolve())
+      .on("error", (err: Error) => reject(err))
+      .run();
+  });
+}
+
 export async function extractFramesToDir(
   videoPath: string,
   outDir: string,
-  opts: { maxFrames?: number; sceneThreshold?: number } = {},
+  opts: { maxFrames?: number; sceneThreshold?: number; targetFrames?: number } = {},
 ): Promise<RawFrame[]> {
   const maxFrames = opts.maxFrames ?? 120;
+  const targetFrames = Math.min(opts.targetFrames ?? 40, maxFrames);
   const threshold = opts.sceneThreshold ?? 0.3;
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+  const duration = await probeDuration(videoPath);
 
   const sceneDir = path.join(outDir, "scene");
   fs.mkdirSync(sceneDir, { recursive: true });
@@ -33,61 +76,50 @@ export async function extractFramesToDir(
   const ptsRe = /pts_time:\s*([\d.]+)/;
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(videoPath)
-        .outputOptions([
-          "-vf",
-          `select='gt(scene,${threshold})',scale=1280:-2,showinfo`,
-          "-vsync",
-          "vfr",
-          "-frames:v",
-          String(maxFrames),
-          "-q:v",
-          "3",
-        ])
-        .output(path.join(sceneDir, "scene-%04d.jpg"))
-        .on("stderr", (line: string) => {
-          const m = ptsRe.exec(line);
-          if (m) timestamps.push(Number(m[1]));
-        })
-        .on("end", () => resolve())
-        .on("error", (err: Error) => reject(err))
-        .run();
-    });
+    await capture(
+      videoPath,
+      sceneDir,
+      "scene",
+      `select='gt(scene,${threshold})',scale=1280:-2,showinfo`,
+      maxFrames,
+      (line) => {
+        const m = ptsRe.exec(line);
+        if (m) timestamps.push(Number(m[1]));
+      },
+    );
   } catch {
     // fall through to interval sampling
   }
 
-  let files = listFrames(sceneDir, "scene-");
-  if (files.length >= 4) {
-    return files.map((f, i) => ({
+  const sceneFiles = listFrames(sceneDir, "scene-");
+  if (sceneFiles.length >= 3) {
+    return sceneFiles.map((f, i) => ({
       path: path.join(sceneDir, f),
-      timestamp: timestamps[i] ?? i * 20,
+      timestamp: timestamps[i] ?? (duration ? (i / sceneFiles.length) * duration : i * 10),
     }));
   }
 
   const intervalDir = path.join(outDir, "interval");
   fs.mkdirSync(intervalDir, { recursive: true });
+  const safeDuration = duration > 0 ? duration : 60;
+  const fps = Math.min(2, Math.max(1 / 60, targetFrames / safeDuration));
+  const interval = 1 / fps;
+
   try {
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(videoPath)
-        .outputOptions([
-          "-vf",
-          "fps=1/20,scale=1280:-2",
-          "-frames:v",
-          String(maxFrames),
-          "-q:v",
-          "3",
-        ])
-        .output(path.join(intervalDir, "interval-%04d.jpg"))
-        .on("end", () => resolve())
-        .on("error", (err: Error) => reject(err))
-        .run();
-    });
+    await capture(
+      videoPath,
+      intervalDir,
+      "interval",
+      `fps=${fps.toFixed(4)},scale=1280:-2`,
+      maxFrames,
+    );
   } catch {
     return [];
   }
 
-  files = listFrames(intervalDir, "interval-");
-  return files.map((f, i) => ({ path: path.join(intervalDir, f), timestamp: i * 20 }));
+  const files = listFrames(intervalDir, "interval-");
+  return files.map((f, i) => ({
+    path: path.join(intervalDir, f),
+    timestamp: Math.min(i * interval + interval / 2, safeDuration),
+  }));
 }

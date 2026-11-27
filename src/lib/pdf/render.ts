@@ -9,6 +9,8 @@ import type {
   VideoMeta,
 } from "../types";
 import { formatTimestamp } from "../youtube/url";
+import { registerFonts, type RegisteredFonts } from "./fonts";
+import { writeText } from "./text";
 
 const COLORS = {
   ink: "#111827",
@@ -40,10 +42,17 @@ function ensureSpace(doc: PDFKit.PDFDocument, needed: number): void {
   if (doc.y + needed > pageBottom(doc)) doc.addPage();
 }
 
-function heading(doc: PDFKit.PDFDocument, text: string, size = 18): void {
+function heading(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, text: string, size = 18): void {
   ensureSpace(doc, 48);
   doc.moveDown(0.6);
-  doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(size).text(text, { width: CONTENT_WIDTH });
+  writeText(doc, fonts, text, {
+    x: PAGE.margin,
+    width: CONTENT_WIDTH,
+    size,
+    bold: true,
+    color: COLORS.ink,
+    lineGap: 2,
+  });
   doc.moveDown(0.35);
   doc
     .strokeColor(COLORS.rule)
@@ -54,22 +63,25 @@ function heading(doc: PDFKit.PDFDocument, text: string, size = 18): void {
   doc.moveDown(0.5);
 }
 
-function bullet(doc: PDFKit.PDFDocument, text: string): void {
+function bullet(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, text: string): void {
   ensureSpace(doc, 24);
   const y = doc.y;
-  doc.fillColor(COLORS.accent).font("Helvetica-Bold").fontSize(10).text("•", PAGE.margin, y, {
+  doc.fillColor(COLORS.accent).font(fonts.bodyBold).fontSize(10).text("•", PAGE.margin, y, {
     width: 14,
     continued: false,
   });
-  doc
-    .fillColor(COLORS.ink)
-    .font("Helvetica")
-    .fontSize(10.5)
-    .text(text, PAGE.margin + 16, y, { width: CONTENT_WIDTH - 16, lineGap: 2 });
+  writeText(doc, fonts, text, {
+    x: PAGE.margin + 16,
+    y,
+    width: CONTENT_WIDTH - 16,
+    size: 10.5,
+    color: COLORS.ink,
+    lineGap: 2,
+  });
   doc.moveDown(0.25);
 }
 
-function cover(doc: PDFKit.PDFDocument, input: RenderInput): void {
+function cover(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, input: RenderInput): void {
   const { meta, options } = input;
   const w = doc.page.width;
   const h = doc.page.height;
@@ -77,55 +89,96 @@ function cover(doc: PDFKit.PDFDocument, input: RenderInput): void {
   doc.rect(0, h - 8, w, 8).fill(COLORS.accent);
 
   const title = options.coverTitle?.trim() || meta.title;
-  doc
-    .fillColor("#ffffff")
-    .font("Helvetica-Bold")
-    .fontSize(30)
-    .text(title, PAGE.margin, 150, { width: w - PAGE.margin * 2, lineGap: 4 });
+  writeText(doc, fonts, title, {
+    x: PAGE.margin,
+    y: 150,
+    width: w - PAGE.margin * 2,
+    size: 30,
+    bold: true,
+    color: "#ffffff",
+    lineGap: 4,
+  });
 
+  doc.y = Math.max(doc.y, 150 + 60);
   doc.moveDown(0.6);
-  doc.fillColor(COLORS.coverAccent).font("Helvetica").fontSize(13).text(meta.channel);
+  writeText(doc, fonts, meta.channel, {
+    x: PAGE.margin,
+    width: w - PAGE.margin * 2,
+    size: 13,
+    color: COLORS.coverAccent,
+  });
   if (meta.durationSeconds) {
-    doc.fontSize(11).fillColor("#cbd5e1").text(`Duration ${formatTimestamp(meta.durationSeconds)}`);
-  }
-
-  doc
-    .fillColor("#e5e7eb")
-    .font("Helvetica")
-    .fontSize(11)
-    .text(
-      `${input.usedAi ? "AI-generated" : "Basic (offline)"} study notes  •  ${input.options.language}  •  ${input.options.style.replace("-", " ")}`,
-      PAGE.margin,
-      h - 150,
-      { width: w - PAGE.margin * 2 },
-    );
-
-  if (options.author?.trim()) {
-    doc.fillColor("#9ca3af").fontSize(10).text(`Prepared by ${options.author}`, PAGE.margin, h - 120, {
+    doc.moveDown(0.2);
+    writeText(doc, fonts, `Duration ${formatTimestamp(meta.durationSeconds)}`, {
+      x: PAGE.margin,
       width: w - PAGE.margin * 2,
+      size: 11,
+      color: "#cbd5e1",
     });
   }
-  doc.fillColor("#6b7280").fontSize(9).text(meta.url, PAGE.margin, h - 100, {
+
+  writeText(
+    doc,
+    fonts,
+    `${input.usedAi ? "AI-generated" : "Basic (offline)"} study notes  •  ${input.options.language}  •  ${input.options.style.replace("-", " ")}`,
+    {
+      x: PAGE.margin,
+      y: h - 150,
+      width: w - PAGE.margin * 2,
+      size: 11,
+      color: "#e5e7eb",
+    },
+  );
+
+  if (options.author?.trim()) {
+    writeText(doc, fonts, `Prepared by ${options.author}`, {
+      x: PAGE.margin,
+      y: h - 120,
+      width: w - PAGE.margin * 2,
+      size: 10,
+      color: "#9ca3af",
+    });
+  }
+  writeText(doc, fonts, meta.url, {
+    x: PAGE.margin,
+    y: h - 100,
     width: w - PAGE.margin * 2,
+    size: 9,
+    color: "#6b7280",
   });
   doc.addPage();
 }
 
-function contents(doc: PDFKit.PDFDocument, notes: NotesDocument): void {
-  heading(doc, "Contents", 20);
+function contents(
+  doc: PDFKit.PDFDocument,
+  fonts: RegisteredFonts,
+  notes: NotesDocument,
+  includeTimestamps: boolean,
+): void {
+  heading(doc, fonts, "Contents", 20);
   notes.sections.forEach((s, i) => {
-    const label = s.timestamp !== undefined ? `${formatTimestamp(s.timestamp)}  ·  ${s.heading}` : s.heading;
-    doc.fillColor(COLORS.ink).font("Helvetica").fontSize(11).text(`${i + 1}.  ${label}`, {
+    const label =
+      includeTimestamps && s.timestamp !== undefined
+        ? `${formatTimestamp(s.timestamp)}  ·  ${s.heading}`
+        : s.heading;
+    writeText(doc, fonts, `${i + 1}.  ${label}`, {
+      x: PAGE.margin,
       width: CONTENT_WIDTH,
+      size: 11,
+      color: COLORS.ink,
     });
     doc.moveDown(0.15);
   });
 }
 
-async function slidesGallery(doc: PDFKit.PDFDocument, slides: SlideItem[]): Promise<void> {
+async function slidesGallery(
+  doc: PDFKit.PDFDocument,
+  fonts: RegisteredFonts,
+  slides: SlideItem[],
+): Promise<void> {
   if (!slides.length) return;
   doc.addPage();
-  heading(doc, "Slides & Visuals", 20);
+  heading(doc, fonts, "Slides & Visuals", 20);
   for (const slide of slides) {
     try {
       if (!fs.existsSync(slide.imagePath)) continue;
@@ -144,13 +197,22 @@ async function slidesGallery(doc: PDFKit.PDFDocument, slides: SlideItem[]): Prom
       doc.y += drawH + 6;
 
       const label = `Slide ${slide.index + 1}  ·  ${formatTimestamp(slide.timestamp)}`;
-      doc.fillColor(COLORS.muted).font("Helvetica-Bold").fontSize(9).text(label, PAGE.margin, doc.y);
+      writeText(doc, fonts, label, {
+        x: PAGE.margin,
+        width: CONTENT_WIDTH,
+        size: 9,
+        bold: true,
+        color: COLORS.muted,
+      });
       doc.moveDown(0.2);
 
       const caption = slide.caption || slide.ocrText;
       if (caption) {
-        doc.fillColor(COLORS.ink).font("Helvetica").fontSize(10).text(caption, {
+        writeText(doc, fonts, caption, {
+          x: PAGE.margin,
           width: CONTENT_WIDTH,
+          size: 10,
+          color: COLORS.ink,
           lineGap: 2,
         });
       }
@@ -161,46 +223,62 @@ async function slidesGallery(doc: PDFKit.PDFDocument, slides: SlideItem[]): Prom
   }
 }
 
-function questions(doc: PDFKit.PDFDocument, notes: NotesDocument): void {
+function questions(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, notes: NotesDocument): void {
   if (!notes.questions?.length) return;
-  heading(doc, "Review Questions", 18);
+  heading(doc, fonts, "Review Questions", 18);
   notes.questions.forEach((qa, i) => {
     ensureSpace(doc, 40);
-    doc
-      .fillColor(COLORS.ink)
-      .font("Helvetica-Bold")
-      .fontSize(11)
-      .text(`Q${i + 1}. ${qa.q}`, { width: CONTENT_WIDTH });
-    doc.moveDown(0.15);
-    doc.fillColor(COLORS.muted).font("Helvetica").fontSize(10).text(`A. ${qa.a}`, {
+    writeText(doc, fonts, `Q${i + 1}. ${qa.q}`, {
+      x: PAGE.margin,
       width: CONTENT_WIDTH,
+      size: 11,
+      bold: true,
+      color: COLORS.ink,
+    });
+    doc.moveDown(0.15);
+    writeText(doc, fonts, `A. ${qa.a}`, {
+      x: PAGE.margin,
+      width: CONTENT_WIDTH,
+      size: 10,
+      color: COLORS.muted,
       lineGap: 2,
     });
     doc.moveDown(0.6);
   });
 }
 
-function transcriptAppendix(doc: PDFKit.PDFDocument, segments: TranscriptSegment[]): void {
+function transcriptAppendix(
+  doc: PDFKit.PDFDocument,
+  fonts: RegisteredFonts,
+  segments: TranscriptSegment[],
+): void {
   if (!segments.length) return;
   doc.addPage();
-  heading(doc, "Full Transcript", 20);
-  doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9.5);
+  heading(doc, fonts, "Full Transcript", 20);
   for (const seg of segments) {
     ensureSpace(doc, 20);
     const y = doc.y;
-    doc.fillColor(COLORS.accent).font("Helvetica-Bold").fontSize(8.5).text(formatTimestamp(seg.start), PAGE.margin, y, {
+    writeText(doc, fonts, formatTimestamp(seg.start), {
+      x: PAGE.margin,
+      y,
       width: 42,
+      size: 8.5,
+      bold: true,
+      color: COLORS.accent,
     });
-    doc
-      .fillColor(COLORS.ink)
-      .font("Helvetica")
-      .fontSize(9.5)
-      .text(seg.text, PAGE.margin + 46, y, { width: CONTENT_WIDTH - 46, lineGap: 1.5 });
+    writeText(doc, fonts, seg.text, {
+      x: PAGE.margin + 46,
+      y,
+      width: CONTENT_WIDTH - 46,
+      size: 9.5,
+      color: COLORS.ink,
+      lineGap: 1.5,
+    });
     doc.moveDown(0.15);
   }
 }
 
-function addFooters(doc: PDFKit.PDFDocument, title: string): void {
+function addFooters(doc: PDFKit.PDFDocument, fonts: RegisteredFonts, title: string): void {
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
@@ -209,7 +287,7 @@ function addFooters(doc: PDFKit.PDFDocument, title: string): void {
     doc.page.margins.bottom = 0;
     doc
       .fillColor(COLORS.muted)
-      .font("Helvetica")
+      .font(fonts.body)
       .fontSize(8)
       .text(title.slice(0, 60), PAGE.margin, doc.page.height - 34, {
         width: CONTENT_WIDTH * 0.7,
@@ -238,28 +316,38 @@ export async function renderPdf(input: RenderInput): Promise<void> {
     },
   });
 
+  const fonts = registerFonts(doc);
+
   const stream = fs.createWriteStream(input.outPath);
   doc.pipe(stream);
 
-  cover(doc, input);
-  contents(doc, notes);
+  cover(doc, fonts, input);
+  contents(doc, fonts, notes, options.includeTimestamps);
 
   doc.addPage();
-  heading(doc, options.coverTitle?.trim() || meta.title, 20);
-  doc.fillColor(COLORS.muted).font("Helvetica").fontSize(9).text(`${meta.channel}  ·  ${meta.url}`);
+  heading(doc, fonts, options.coverTitle?.trim() || meta.title, 20);
+  writeText(doc, fonts, `${meta.channel}  ·  ${meta.url}`, {
+    x: PAGE.margin,
+    width: CONTENT_WIDTH,
+    size: 9,
+    color: COLORS.muted,
+  });
   doc.moveDown(0.4);
 
   if (notes.summary) {
-    doc.fillColor(COLORS.ink).font("Helvetica").fontSize(11).text(notes.summary, {
+    writeText(doc, fonts, notes.summary, {
+      x: PAGE.margin,
       width: CONTENT_WIDTH,
+      size: 11,
+      color: COLORS.ink,
       lineGap: 3,
     });
     doc.moveDown(0.6);
   }
 
   if (notes.keyTakeaways.length) {
-    heading(doc, "Key Takeaways", 15);
-    notes.keyTakeaways.forEach((t) => bullet(doc, t));
+    heading(doc, fonts, "Key Takeaways", 15);
+    notes.keyTakeaways.forEach((t) => bullet(doc, fonts, t));
     doc.moveDown(0.4);
   }
 
@@ -268,15 +356,15 @@ export async function renderPdf(input: RenderInput): Promise<void> {
       options.includeTimestamps && section.timestamp !== undefined
         ? `${section.heading}  (${formatTimestamp(section.timestamp)})`
         : section.heading;
-    heading(doc, title, 15);
-    section.bullets.forEach((b) => bullet(doc, b));
+    heading(doc, fonts, title, 15);
+    section.bullets.forEach((b) => bullet(doc, fonts, b));
   });
 
-  questions(doc, notes);
-  await slidesGallery(doc, slides);
-  if (options.includeTranscript) transcriptAppendix(doc, transcript);
+  questions(doc, fonts, notes);
+  await slidesGallery(doc, fonts, slides);
+  if (options.includeTranscript) transcriptAppendix(doc, fonts, transcript);
 
-  addFooters(doc, options.coverTitle?.trim() || meta.title);
+  addFooters(doc, fonts, options.coverTitle?.trim() || meta.title);
   doc.end();
 
   await new Promise<void>((resolve, reject) => {

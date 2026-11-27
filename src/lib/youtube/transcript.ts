@@ -94,8 +94,8 @@ async function fromYoutubeTranscript(videoId: string): Promise<TranscriptSegment
       const items = await YoutubeTranscript.fetchTranscript(videoId, lang ? { lang } : undefined);
       if (items?.length) {
         return items.map((i) => ({
-          start: i.offset,
-          duration: i.duration,
+          start: i.offset / 1000,
+          duration: i.duration / 1000,
           text: i.text.replace(/\s+/g, " ").trim(),
         }));
       }

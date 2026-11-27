@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const CACHE_DIR = path.join(process.cwd(), "data", "ocr");
+const MIN_CONFIDENCE = 60;
 
 let workerPromise: Promise<Worker> | null = null;
 
@@ -17,10 +18,32 @@ async function getWorker(): Promise<Worker> {
   return workerPromise;
 }
 
+function alnumRatio(text: string): number {
+  const visible = text.replace(/\s/g, "");
+  if (!visible) return 0;
+  const alnum = visible.replace(/[^A-Za-z0-9]/g, "").length;
+  return alnum / visible.length;
+}
+
+export function cleanOcrText(raw: string, confidence: number): string {
+  if (confidence < MIN_CONFIDENCE) return "";
+  const lines = raw
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => l.length >= 4 && alnumRatio(l) >= 0.65);
+
+  const text = lines.join("\n").trim();
+  if (!text) return "";
+
+  const words = text.split(/\s+/).filter((w) => /[A-Za-z0-9]{2,}/.test(w));
+  if (text.length < 12 || words.length < 3) return "";
+  return text;
+}
+
 export async function ocrImage(filePath: string): Promise<string> {
   const worker = await getWorker();
   const result = await worker.recognize(filePath);
-  return (result.data.text ?? "").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+  return cleanOcrText(result.data.text ?? "", result.data.confidence ?? 0);
 }
 
 export async function ocrFrames(

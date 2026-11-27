@@ -184,22 +184,44 @@ function extractiveNotes(
     const bullets = extractiveKeyPoints(text, 6);
     if (!bullets.length) continue;
     sections.push({
-      heading: `Part ${sections.length + 1} — ${formatTimestamp(start)}`,
+      heading: `Part ${sections.length + 1}`,
       timestamp: start,
       bullets,
     });
   }
 
-  if (slides.length) {
+  const described = slides.filter((s) => s.caption || s.ocrText);
+  if (described.length) {
     sections.push({
       heading: "Slides & visuals",
-      bullets: slides.map((s) => {
+      bullets: described.map((s) => {
         const label = `[${formatTimestamp(s.timestamp)}]`;
-        const content = s.caption || s.ocrText || "Slide frame captured";
+        const content = s.caption || s.ocrText;
         return `${label} ${content}`;
       }),
     });
   }
+
+  const norm = (t: string) => t.toLowerCase().replace(/\W+/g, " ").trim();
+  const seen = new Set<string>();
+  const uniquePoints = (items: string[]) => {
+    const out: string[] = [];
+    for (const item of items) {
+      const key = norm(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  };
+
+  const summary =
+    extractiveSummary(fullText, options.depth === "brief" ? 4 : 7) || `Notes for ${meta.title}.`;
+  const keyTakeaways = uniquePoints(extractiveKeyPoints(fullText, 8));
+  const dedupedSections = sections.map((section) => ({
+    ...section,
+    bullets: uniquePoints(section.bullets),
+  })).filter((section) => section.bullets.length > 0);
 
   const questions =
     options.style === "qa"
@@ -210,9 +232,9 @@ function extractiveNotes(
       : [];
 
   return {
-    summary: extractiveSummary(fullText, options.depth === "brief" ? 4 : 7) || `Notes for ${meta.title}.`,
-    keyTakeaways: extractiveKeyPoints(fullText, 8),
-    sections,
+    summary,
+    keyTakeaways,
+    sections: dedupedSections,
     questions,
   };
 }
