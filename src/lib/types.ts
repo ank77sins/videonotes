@@ -38,7 +38,7 @@ export const DEFAULT_OPTIONS: PdfOptions = {
   tone: "neutral",
   includeSlides: false,
   includeTimestamps: true,
-  includeTranscript: true,
+  includeTranscript: false,
   style: "notes",
   coverTitle: "",
   author: "",
@@ -67,17 +67,32 @@ export interface SlideItem {
   caption: string;
 }
 
+export type NotesBlock =
+  | { type: "para"; text: string }
+  | { type: "bullets"; items: string[] }
+  | { type: "steps"; items: string[] }
+  | { type: "table"; headers: string[]; rows: string[][] };
+
+export interface NotesSubsection {
+  heading: string;
+  blocks: NotesBlock[];
+}
+
 export interface NotesSection {
   heading: string;
   timestamp?: number;
   bullets: string[];
+  blocks?: NotesBlock[];
+  subsections?: NotesSubsection[];
 }
 
 export interface NotesDocument {
+  title?: string;
   summary: string;
   sections: NotesSection[];
   keyTakeaways: string[];
   questions?: { q: string; a: string }[];
+  excluded?: string[];
   warning?: string;
 }
 

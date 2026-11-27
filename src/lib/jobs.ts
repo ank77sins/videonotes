@@ -260,7 +260,10 @@ async function runJob(id: string, input: StartJobInput): Promise<void> {
     outPath,
   });
 
-  updateJob(id, { pdfPath: outPath, status: "done", progress: 100, step: "Done", message: null });
+  const warning = !usedAi && notes.warning
+    ? `AI notes failed (${notes.warning.slice(0, 140)}). This PDF uses basic offline notes.`
+    : null;
+  updateJob(id, { pdfPath: outPath, status: "done", progress: 100, step: "Done", message: warning });
   void terminateOcr();
   cleanupWorkDir(id);
 }

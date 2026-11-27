@@ -63,6 +63,23 @@ no guessing required.
 Hosted providers process transcript sections **6 at a time** and handle the whole
 transcript in a single pass, so a 20-minute video typically finishes in **10–30 seconds**.
 
+### What the PDF looks like
+
+The AI rebuilds the transcript as a structured document instead of a transcript dump:
+
+- **Cover**, then a **Contents** page listing every section.
+- **Overview** (2–4 lines) and up to **5 Key Takeaways**, all taken from the video.
+- **Sections** with descriptive headings (never "Part 1"), written as short
+  paragraphs, bullet lists, numbered steps for procedures, and tables for
+  comparisons or numbers.
+- **Sub-headings** where a topic breaks into smaller points.
+- Optional **Review Questions**, and one line listing excluded sponsor/promo segments.
+
+Rules the model follows: no information loss, no invented content, no commentary,
+filler removed, garbled speech marked `[unclear: ...]`, and the speaker's
+unverified claims attributed to them. If the AI call fails, the PDF is built in
+basic offline mode and says so on the cover.
+
 ### Private: local with Ollama (minutes)
 
 Everything stays on your machine. Install [Ollama](https://ollama.com/download):

@@ -2,8 +2,10 @@ import { complete, isConfigured } from "../llm";
 import { extractiveKeyPoints, extractiveSummary } from "../llm/extractive";
 import type {
   LlmConfig,
+  NotesBlock,
   NotesDocument,
   NotesSection,
+  NotesSubsection,
   PdfOptions,
   SlideItem,
   TranscriptSegment,
@@ -11,7 +13,7 @@ import type {
 } from "../types";
 import { formatTimestamp } from "../youtube/url";
 
-const CHUNK_CHARS = 6000;
+const CHUNK_CHARS = 9000;
 const MAX_TRANSCRIPT_CHARS = 120000;
 
 interface Chunk {
@@ -38,7 +40,6 @@ function buildChunks(segments: TranscriptSegment[]): Chunk[] {
 
 const LOCAL_MAX_CHUNKS = 8;
 const CLOUD_MAX_CHUNKS = 12;
-const CHUNK_MAX_TOKENS = 400;
 const LOCAL_SINGLE_PASS_CHARS = 24000;
 const CLOUD_SINGLE_PASS_CHARS = 90000;
 const LOCAL_CONCURRENCY = 2;
@@ -58,6 +59,17 @@ function singlePassCharsFor(cfg: LlmConfig): number {
 
 function concurrencyFor(cfg: LlmConfig): number {
   return isCloud(cfg) ? CLOUD_CONCURRENCY : LOCAL_CONCURRENCY;
+}
+
+function chunkTokensFor(cfg: LlmConfig): number {
+  return isCloud(cfg) ? 1400 : 700;
+}
+
+function finalTokensFor(cfg: LlmConfig, depth: PdfOptions["depth"]): number {
+  const cloud = isCloud(cfg);
+  if (depth === "brief") return cloud ? 3500 : 1800;
+  if (depth === "detailed") return cloud ? 8000 : 3000;
+  return cloud ? 6000 : 2400;
 }
 
 function mergeIntoFew(chunks: Chunk[], maxChunks: number): Chunk[] {
@@ -92,26 +104,64 @@ function safeJson<T>(raw: string): T | null {
 function styleInstruction(style: PdfOptions["style"]): string {
   switch (style) {
     case "outline":
-      return "Produce a hierarchical outline: sections with nested bullet points. Keep bullets terse.";
+      return "Emphasis: a hierarchical outline. Prefer short bullet blocks over paragraphs; nest detail under subsections.";
     case "study-guide":
-      return "Produce a study guide: clear sections, key concepts explained, definitions, and review questions.";
+      return "Emphasis: a study guide. Explain key concepts, keep definitions, and add review questions with answers.";
     case "qa":
-      return "Produce a Q&A style document: a series of important questions and thorough answers covering the content.";
+      return "Emphasis: a Q&A document. Organise sections as questions with thorough answers, and fill the questions array.";
     default:
-      return "Produce detailed, well-organized lecture notes: sections with explanatory bullet points.";
+      return "Emphasis: detailed lecture notes. Explanatory paragraphs plus bullets, steps and tables.";
   }
 }
 
 function depthInstruction(depth: PdfOptions["depth"]): string {
   switch (depth) {
     case "brief":
-      return "Be concise: 3-6 sections, 3-5 bullets each.";
+      return "Length: brief. 3-6 sections. Keep every fact but compress wording hard.";
     case "detailed":
-      return "Be thorough: 6-12 sections, 5-9 bullets each, with examples and specifics.";
+      return "Length: thorough. 6-12 sections, keep examples, numbers and caveats in full.";
     default:
-      return "Be balanced: 4-8 sections, 4-7 bullets each.";
+      return "Length: balanced. 4-9 sections.";
   }
 }
+
+const CHUNK_SYSTEM = [
+  "You are a Transcript-to-Document Structurer working on ONE slice of a YouTube transcript.",
+  "Rebuild this slice as a dense, factual outline in Markdown.",
+  "ZERO INFORMATION LOSS: keep every fact, number, statistic, name, date, tool, link, code snippet, formula, step, example, analogy, warning, caveat and definition.",
+  "Compress language only: drop filler (um, you know, basically), false starts and repeated sentences. Never invent anything.",
+  "Mark garbled ASR as [unclear: best-guess wording]. Skip sponsor reads and subscribe requests.",
+  "Use '## ' for topic headings that describe the content (never 'Part 1'), '- ' for bullets, and numbered lists for ordered steps.",
+  "Output Markdown only. No preamble, no commentary.",
+].join(" ");
+
+const SYSTEM_PROMPT = [
+  "ROLE: You are a Transcript-to-Document Structurer. You convert raw YouTube video transcripts into clean, section-wise, PDF-ready documents.",
+  "ABSOLUTE RULES (never violate):",
+  "1. ZERO INFORMATION LOSS. Every fact, number, statistic, name, date, tool, link, code snippet, formula, step, example, warning and caveat in the transcript must appear in the output.",
+  "2. COMPRESS LANGUAGE, NOT CONTENT. Remove filler (um, you know, so basically), false starts, repeated sentences and verbal padding. Never merge two distinct ideas into one vague sentence.",
+  "3. NEVER INVENT. Do not add outside knowledge, opinions, examples or improvements. If the transcript is unclear or garbled, keep the content but mark it inline as [unclear: best-guess wording].",
+  "4. NEVER EVALUATE. Do not praise, critique or comment on the video or the speaker.",
+  "5. PRESERVE STRUCTURE OF ARGUMENTS. If the speaker says '3 reasons', output exactly 3. If step order matters, keep the order.",
+  "6. DO NOT DROP examples, analogies (tighten but keep), caveats, exceptions, warnings, definitions, or asides that carry real information.",
+  "7. EXCLUDE sponsor reads, channel promos and subscribe requests; list what you excluded in the excluded array.",
+  "8. Present the speaker's unverified claims as claims, e.g. 'The speaker argues that ...'.",
+  "PROCESS: CLEAN the text, SEGMENT it by topic shifts (not by time), OUTLINE a heading hierarchy so every idea has a home, REBUILD each section, then VERIFY before answering.",
+  "HEADINGS: descriptive of the content, never 'Part 1' or 'Section 2'. The title is a short descriptive H1, not the raw video title.",
+  "BLOCK TYPES: use para for explanation (max ~4 lines), bullets for lists and parallel items (max ~2 lines each), steps for ordered procedures, table for comparisons or multi-attribute data.",
+  "Bold only key terms and labels, using **double asterisks** inside text. No emojis, no HTML, no LaTeX, no decorative separators.",
+  "SELF-CHECK before answering: every number, name and link present; every example and caveat retained; nothing invented; headings describe content; no paragraph or bullet over the length limit; a reader who never watched the video can fully understand it.",
+].join(" ");
+
+const SCHEMA_HINT = [
+  "Respond with STRICT JSON only, no prose and no code fences, matching exactly:",
+  '{"title": string, "overview": string, "keyTakeaways": string[],',
+  '"sections": [{"heading": string, "timestamp": number|null,',
+  '"blocks": [{"type":"para","text":string} | {"type":"bullets","items":string[]} | {"type":"steps","items":string[]} | {"type":"table","headers":string[],"rows":string[][]}],',
+  '"subsections": [{"heading": string, "blocks": [...]}]}],',
+  '"questions": [{"q": string, "a": string}], "excluded": string[]}',
+  "overview is 2-4 sentences. keyTakeaways has at most 5 bullets, each a fact from the transcript. timestamp is total seconds or null. questions only for study-guide or qa styles, otherwise [].",
+].join(" ");
 
 async function mapChunks(
   chunks: Chunk[],
@@ -127,17 +177,13 @@ async function mapChunks(
       out[index] = await complete(
         cfg,
         [
-          {
-            role: "system",
-            content:
-              "You are an expert note-taker. Extract the key ideas from this section of a video transcript. Keep timestamps like [mm:ss] where useful. Output at most 5 short bullet points, no preamble.",
-          },
+          { role: "system", content: CHUNK_SYSTEM },
           { role: "user", content: chunk.text },
         ],
-        { temperature: 0.2, maxTokens: CHUNK_MAX_TOKENS },
+        { temperature: 0.1, maxTokens: chunkTokensFor(cfg) },
       );
     } catch (err) {
-      out[index] = `(section starting ${formatTimestamp(chunk.start)} could not be summarized)`;
+      out[index] = `(the slice starting ${formatTimestamp(chunk.start)} could not be processed)`;
       if (index === 0) throw err;
     }
     done++;
@@ -169,6 +215,81 @@ function slidesPromptBlock(slides: SlideItem[]): string {
   return `\n\nSlides captured from the video (timestamp — content):\n${lines.join("\n")}`;
 }
 
+function cleanText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+function cleanList(value: unknown, limit = 400): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(cleanText).filter(Boolean).slice(0, limit);
+}
+
+function normalizeBlocks(value: unknown): NotesBlock[] {
+  if (!Array.isArray(value)) return [];
+  const blocks: NotesBlock[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const type = cleanText(item.type).toLowerCase();
+    if (type === "para" || type === "paragraph" || type === "text") {
+      const text = cleanText(item.text);
+      if (text) blocks.push({ type: "para", text });
+      continue;
+    }
+    if (type === "bullets" || type === "list" || type === "bullet") {
+      const items = cleanList(item.items ?? item.bullets);
+      if (items.length) blocks.push({ type: "bullets", items });
+      continue;
+    }
+    if (type === "steps" || type === "numbered" || type === "ordered") {
+      const items = cleanList(item.items ?? item.steps);
+      if (items.length) blocks.push({ type: "steps", items });
+      continue;
+    }
+    if (type === "table") {
+      const headers = cleanList(item.headers, 6);
+      const rows = Array.isArray(item.rows)
+        ? item.rows
+            .filter((row): row is unknown[] => Array.isArray(row))
+            .map((row) => row.map(cleanText).slice(0, headers.length || 6))
+            .filter((row) => row.some(Boolean))
+        : [];
+      if (headers.length && rows.length) blocks.push({ type: "table", headers, rows });
+    }
+  }
+  return blocks;
+}
+
+function normalizeSubsections(value: unknown): NotesSubsection[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === "object")
+    .map((s) => ({
+      heading: cleanText(s.heading) || "Details",
+      blocks: normalizeBlocks(s.blocks),
+    }))
+    .filter((s) => s.blocks.length > 0);
+}
+
+function normalizeSections(value: unknown): NotesSection[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === "object")
+    .map((s) => {
+      const blocks = normalizeBlocks(s.blocks);
+      const bullets = cleanList(s.bullets);
+      const legacy: NotesBlock[] = bullets.length ? [{ type: "bullets", items: bullets }] : [];
+      return {
+        heading: cleanText(s.heading) || "Section",
+        timestamp: typeof s.timestamp === "number" ? s.timestamp : undefined,
+        bullets,
+        blocks: blocks.length ? blocks : legacy,
+        subsections: normalizeSubsections(s.subsections),
+      };
+    })
+    .filter((s) => (s.blocks?.length ?? 0) > 0 || (s.subsections?.length ?? 0) > 0);
+}
+
 async function synthesize(
   chunkNotes: string[],
   meta: VideoMeta,
@@ -178,19 +299,24 @@ async function synthesize(
 ): Promise<NotesDocument> {
   const body = chunkNotes.join("\n\n").slice(0, MAX_TRANSCRIPT_CHARS);
   const system = [
-    "You are an expert educator who turns video content into polished study notes.",
-    `Write in ${options.language}. Audience: ${options.audience}. Tone: ${options.tone}.`,
+    SYSTEM_PROMPT,
+    `Write in ${options.language}. Target reader: ${options.audience}. Tone: ${options.tone}.`,
     styleInstruction(options.style),
     depthInstruction(options.depth),
-    "Respond with STRICT JSON only, matching this schema:",
-    '{"summary": string, "keyTakeaways": string[], "sections": [{"heading": string, "timestamp": number|null, "bullets": string[]}], "questions": [{"q": string, "a": string}]}',
-    "timestamp must be total seconds (number) or null. Include questions only for study-guide or qa styles, otherwise an empty array.",
     options.includeTimestamps
-      ? "Reference timestamps like [mm:ss] where useful."
-      : "Do not include timestamps in the notes.",
+      ? "Set each section's timestamp field to the moment that section starts."
+      : "Set every section timestamp to null and do not write timestamps inside the text.",
+    SCHEMA_HINT,
   ].join(" ");
 
-  const user = `Video: "${meta.title}" by ${meta.channel}.\n\nSection notes:\n${body}${slidesPromptBlock(slides)}`;
+  const user = [
+    `Video: "${meta.title}" by ${meta.channel}.`,
+    "The transcript was processed in order. Rebuild it into one coherent, de-duplicated document: merge overlapping sections, keep the original order of ideas, and state repeated information once in the most logical place.",
+    "",
+    "Source material:",
+    body,
+    slidesPromptBlock(slides),
+  ].join("\n");
 
   const raw = await complete(
     cfg,
@@ -198,24 +324,51 @@ async function synthesize(
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 2500 },
+    { temperature: 0.2, maxTokens: finalTokensFor(cfg, options.depth) },
   );
 
-  const parsed = safeJson<NotesDocument>(raw);
-  if (!parsed || !Array.isArray(parsed.sections)) {
-    throw new Error("The model did not return valid notes JSON.");
-  }
+  const parsed = safeJson<Record<string, unknown>>(raw);
+  if (!parsed) throw new Error("The model did not return valid notes JSON.");
+
+  const sections = normalizeSections(parsed.sections);
+  if (!sections.length) throw new Error("The model returned no sections.");
 
   return {
-    summary: parsed.summary ?? "",
-    keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways : [],
-    sections: parsed.sections.map((s) => ({
-      heading: s.heading ?? "Section",
-      timestamp: typeof s.timestamp === "number" ? s.timestamp : undefined,
-      bullets: Array.isArray(s.bullets) ? s.bullets : [],
-    })),
-    questions: Array.isArray(parsed.questions) ? parsed.questions : [],
+    title: cleanText(parsed.title) || undefined,
+    summary: cleanText(parsed.overview) || cleanText(parsed.summary),
+    keyTakeaways: cleanList(parsed.keyTakeaways, 5),
+    sections,
+    questions: Array.isArray(parsed.questions)
+      ? parsed.questions
+          .filter((q): q is Record<string, unknown> => Boolean(q) && typeof q === "object")
+          .map((q) => ({ q: cleanText(q.q), a: cleanText(q.a) }))
+          .filter((q) => q.q && q.a)
+          .slice(0, 20)
+      : [],
+    excluded: cleanList(parsed.excluded, 10),
   };
+}
+
+const STOPWORDS = new Set([
+  "the", "and", "for", "that", "with", "this", "you", "your", "are", "was", "but", "not", "have",
+  "has", "had", "they", "them", "there", "then", "than", "what", "when", "where", "which", "who",
+  "how", "why", "will", "would", "can", "could", "should", "about", "into", "from", "just", "like",
+  "get", "got", "one", "two", "also", "because", "really", "very", "much", "some", "more", "most",
+  "other", "only", "out", "now", "here", "its", "our", "his", "her", "she", "him", "were", "been",
+  "being", "does", "did", "doing", "all", "any", "each", "such", "these", "those",
+]);
+
+function labelFromText(text: string, fallback: string): string {
+  const counts = new Map<string, number>();
+  for (const word of text.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? []) {
+    if (STOPWORDS.has(word)) continue;
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([word]) => word.charAt(0).toUpperCase() + word.slice(1));
+  return top.length ? top.join(", ") : fallback;
 }
 
 function extractiveNotes(
@@ -236,21 +389,34 @@ function extractiveNotes(
     const bullets = extractiveKeyPoints(text, 6);
     if (!bullets.length) continue;
     sections.push({
-      heading: `Part ${sections.length + 1}`,
+      heading: labelFromText(text, `From ${formatTimestamp(start)}`),
       timestamp: start,
       bullets,
+      blocks: [{ type: "bullets", items: bullets }],
     });
+  }
+
+  const seenHeadings = new Set<string>();
+  for (const section of sections) {
+    let heading = section.heading;
+    if (seenHeadings.has(heading)) {
+      heading = `${heading} (${formatTimestamp(section.timestamp ?? 0)})`;
+    }
+    seenHeadings.add(heading);
+    section.heading = heading;
   }
 
   const described = slides.filter((s) => s.caption || s.ocrText);
   if (described.length) {
+    const items = described.map((s) => {
+      const label = `[${formatTimestamp(s.timestamp)}]`;
+      const content = s.caption || s.ocrText;
+      return `${label} ${content}`;
+    });
     sections.push({
       heading: "Slides & visuals",
-      bullets: described.map((s) => {
-        const label = `[${formatTimestamp(s.timestamp)}]`;
-        const content = s.caption || s.ocrText;
-        return `${label} ${content}`;
-      }),
+      bullets: items,
+      blocks: [{ type: "bullets", items }],
     });
   }
 
@@ -269,20 +435,24 @@ function extractiveNotes(
 
   const summary =
     extractiveSummary(fullText, options.depth === "brief" ? 4 : 7) || `Notes for ${meta.title}.`;
-  const keyTakeaways = dedupeWithin(extractiveKeyPoints(fullText, 8));
+  const keyTakeaways = dedupeWithin(extractiveKeyPoints(fullText, 5));
   const dedupedSections = sections
     .map((section) => {
       const bullets = dedupeWithin(section.bullets);
-      return {
-        ...section,
-        bullets: bullets.length ? bullets : section.bullets.slice(0, 1),
-      };
+      const kept = bullets.length ? bullets : section.bullets.slice(0, 1);
+      return { ...section, bullets: kept, blocks: [{ type: "bullets" as const, items: kept }] };
     })
     .filter((section) => section.bullets.length > 0);
 
   if (!dedupedSections.length) {
     const fallback = dedupeWithin(extractiveKeyPoints(fullText, 6));
-    if (fallback.length) dedupedSections.push({ heading: "Overview", bullets: fallback });
+    if (fallback.length) {
+      dedupedSections.push({
+        heading: "Overview",
+        bullets: fallback,
+        blocks: [{ type: "bullets", items: fallback }],
+      });
+    }
   }
 
   const questions =
@@ -324,21 +494,19 @@ export async function buildNotes(
       onProgress?.("Writing notes (single pass)", 10);
       const single = rawChunks.map((c) => c.text).join("\n").slice(0, MAX_TRANSCRIPT_CHARS);
       const notes = await synthesize([single], meta, options, slides, cfg);
-      if (!notes.sections.length) throw new Error("The model returned no sections.");
       onProgress?.("Writing notes (single pass)", 100);
       return { notes, usedAi: true };
     }
 
     const chunks = mergeIntoFew(rawChunks, maxChunksFor(cfg));
-    onProgress?.(`Summarizing ${chunks.length} sections`, 0);
+    onProgress?.(`Structuring ${chunks.length} transcript slices`, 0);
     const chunkNotes = await mapChunks(chunks, cfg, (done, total) =>
-      onProgress?.(`Summarizing ${total} sections`, Math.round((done / total) * 100)),
+      onProgress?.(`Structuring ${total} transcript slices`, Math.round((done / total) * 100)),
     );
 
-    onProgress?.("Writing final notes", 50);
+    onProgress?.("Assembling final document", 50);
     const notes = await synthesize(chunkNotes, meta, options, slides, cfg);
-    if (!notes.sections.length) throw new Error("The model returned no sections.");
-    onProgress?.("Writing final notes", 100);
+    onProgress?.("Assembling final document", 100);
     return { notes, usedAi: true };
   } catch (err) {
     onProgress?.("Falling back to basic notes", 100);

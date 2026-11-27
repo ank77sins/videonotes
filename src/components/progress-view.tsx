@@ -138,7 +138,7 @@ export function ProgressView({ jobId, onReset }: { jobId: string; onReset: () =>
               : done
                 ? "Your PDF is ready"
                 : (job.step ?? "Working")}
-          {active && job.message ? ` — ${job.message}` : ""}
+          {job.message ? ` — ${job.message}` : ""}
         </p>
         {active && job.provider === "ollama" ? (
           <p className="text-xs text-muted-foreground">
