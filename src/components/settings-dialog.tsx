@@ -207,6 +207,11 @@ export function SettingsDialog({
                   setModelsError(null);
                   setDraft({ ...draft, apiKey: e.target.value });
                 }}
+                onBlur={() => {
+                  if (canListModels(draft.provider) && draft.baseUrl.trim() && draft.apiKey.trim()) {
+                    void fetchModels();
+                  }
+                }}
               />
             </div>
           ) : null}
@@ -252,22 +257,10 @@ export function SettingsDialog({
 
           {draft.provider !== "none" ? (
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="model">
-                  Model{" "}
-                  {draft.provider === "ollama" || draft.provider === "custom" ? "" : "(optional)"}
-                </Label>
-                {canListModels(draft.provider) ? (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                    onClick={() => void fetchModels()}
-                    disabled={loadingModels}
-                  >
-                    {loadingModels ? "Checking…" : models.length ? "Refresh list" : "Load models"}
-                  </button>
-                ) : null}
-              </div>
+              <Label htmlFor="model">
+                Model{" "}
+                {draft.provider === "ollama" || draft.provider === "custom" ? "" : "(optional)"}
+              </Label>
               {canListModels(draft.provider) && models.length ? (
                 <Select
                   value={effectiveModel}
@@ -292,6 +285,22 @@ export function SettingsDialog({
                   onChange={(e) => setDraft({ ...draft, model: e.target.value })}
                 />
               )}
+              {canListModels(draft.provider) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  className="w-full"
+                  onClick={() => void fetchModels()}
+                  disabled={loadingModels}
+                >
+                  {loadingModels
+                    ? "Loading models…"
+                    : models.length
+                      ? `Refresh models (${models.length})`
+                      : "Load models from provider"}
+                </Button>
+              ) : null}
               {modelsError ? (
                 <p className="text-xs text-destructive">{modelsError}</p>
               ) : canListModels(draft.provider) && models.length ? (
