@@ -53,6 +53,9 @@ export function SettingsDialog({
 }) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [test, setTest] = useState<TestState>({ kind: "idle" });
+  const [models, setModels] = useState<string[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -63,6 +66,32 @@ export function SettingsDialog({
 
   const provider = PROVIDERS.find((p) => p.value === draft.provider);
   const needsKey = draft.provider !== "none" && draft.provider !== "ollama";
+
+  const fetchModels = async (baseUrl: string) => {
+    setLoadingModels(true);
+    setModelsError(null);
+    try {
+      const res = await fetch(`/api/llm/models?baseUrl=${encodeURIComponent(baseUrl)}`);
+      const data = (await res.json()) as { ok?: boolean; models?: string[]; error?: string };
+      if (data.ok) {
+        setModels(data.models ?? []);
+        if (!data.models?.length) setModelsError("Ollama is running but has no models. Run `ollama pull llama3.2:3b`.");
+      } else {
+        setModels([]);
+        setModelsError(data.error ?? "Could not list models.");
+      }
+    } catch (err) {
+      setModels([]);
+      setModelsError(err instanceof Error ? err.message : "Could not list models.");
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && draft.provider === "ollama") void fetchModels(draft.baseUrl || "http://localhost:11434");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draft.provider]);
 
   const save = () => {
     onSave(draft);
@@ -150,13 +179,55 @@ export function SettingsDialog({
 
           {draft.provider !== "none" ? (
             <div className="space-y-2">
-              <Label htmlFor="model">Model (optional)</Label>
-              <Input
-                id="model"
-                placeholder={MODEL_HINTS[draft.provider]}
-                value={draft.model}
-                onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-              />
+              <div className="flex items-center justify-between">
+                <Label htmlFor="model">Model {draft.provider === "ollama" ? "" : "(optional)"}</Label>
+                {draft.provider === "ollama" ? (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onClick={() => void fetchModels(draft.baseUrl || "http://localhost:11434")}
+                    disabled={loadingModels}
+                  >
+                    {loadingModels ? "Checking…" : "Refresh list"}
+                  </button>
+                ) : null}
+              </div>
+              {draft.provider === "ollama" && models.length ? (
+                <Select
+                  value={draft.model || models[0]}
+                  onValueChange={(v) => setDraft({ ...draft, model: v })}
+                >
+                  <SelectTrigger id="model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="model"
+                  placeholder={MODEL_HINTS[draft.provider]}
+                  value={draft.model}
+                  onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+                />
+              )}
+              {draft.provider === "ollama" ? (
+                models.length ? (
+                  <p className="text-xs text-muted-foreground">
+                    Models installed on your machine. Pick the one you downloaded.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {modelsError ??
+                      "Couldn't list your models. Type the name you pulled, e.g. llama3.2:3b."}
+                  </p>
+                )
+              ) : null}
             </div>
           ) : null}
         </div>

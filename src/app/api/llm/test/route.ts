@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { complete, isConfigured } from "@/lib/llm";
+import { isConfigured, testProvider } from "@/lib/llm";
 import type { LlmConfig } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -19,15 +19,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const reply = await complete(
-      cfg,
-      [
-        { role: "system", content: "Reply with the single word: ready" },
-        { role: "user", content: "ping" },
-      ],
-      { temperature: 0, maxTokens: 16 },
-    );
-    return NextResponse.json({ ok: true, reply: reply.trim().slice(0, 120) });
+    const reply = await testProvider(cfg);
+    return NextResponse.json({ ok: true, reply });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Connection failed.";
     return NextResponse.json({ ok: false, error: message }, { status: 502 });

@@ -9,7 +9,7 @@ const DEFAULT_MODELS: Record<LlmProvider, string> = {
   gemini: "gemini-2.0-flash",
   groq: "llama-3.3-70b-versatile",
   openrouter: "google/gemini-2.0-flash-exp:free",
-  ollama: "llama3.1",
+  ollama: "llama3.2:3b",
   none: "",
 };
 
@@ -89,20 +89,54 @@ export async function complete(
 
   if (cfg.provider === "ollama") {
     const base = (cfg.baseUrl || "http://localhost:11434").replace(/\/$/, "");
-    const data = await postJson(
-      `${base}/api/chat`,
-      {},
-      {
-        model,
-        messages,
-        stream: false,
-        options: { temperature, num_predict: maxTokens },
-      },
-    );
+    let data: any;
+    try {
+      data = await postJson(
+        `${base}/api/chat`,
+        {},
+        {
+          model,
+          messages,
+          stream: false,
+          options: { temperature, num_predict: maxTokens },
+        },
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (/not found/i.test(msg)) {
+        const installed = await listOllamaModels(base).catch(() => [] as string[]);
+        const hint = installed.length
+          ? `Installed models: ${installed.join(", ")}. Set one of these as the model in Settings.`
+          : "No models are installed yet. Run `ollama pull llama3.2:3b`.";
+        throw new Error(
+          `Ollama doesn't have the model "${model}". ${hint} (You can also leave the model blank to use the default.)`,
+        );
+      }
+      throw err;
+    }
     return (data?.message?.content ?? "").trim();
   }
 
   throw new Error(`Unsupported provider: ${cfg.provider}`);
+}
+
+async function listOllamaModels(base: string): Promise<string[]> {
+  const res = await fetch(`${base}/api/tags`, { method: "GET" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { models?: { name?: string }[] };
+  return (data.models ?? []).map((m) => m.name ?? "").filter(Boolean);
+}
+
+export async function testProvider(cfg: LlmConfig): Promise<string> {
+  const reply = await complete(
+    cfg,
+    [
+      { role: "system", content: "Reply with the single word: ready" },
+      { role: "user", content: "ping" },
+    ],
+    { temperature: 0, maxTokens: 16 },
+  );
+  return reply.trim().slice(0, 120);
 }
 
 export async function vision(
