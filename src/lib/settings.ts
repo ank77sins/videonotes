@@ -61,7 +61,7 @@ export function isAiEnabled(settings: Settings): boolean {
   if (settings.provider === "none") return false;
   if (settings.provider === "ollama") return true;
   if (settings.provider === "custom") {
-    return Boolean(settings.apiKey.trim() && settings.baseUrl.trim());
+    return Boolean(settings.baseUrl.trim());
   }
   return Boolean(settings.apiKey.trim());
 }

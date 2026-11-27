@@ -23,7 +23,7 @@ const OPENAI_COMPATIBLE_BASE: Partial<Record<LlmProvider, string>> = {
 
 const OPENAI_COMPATIBLE: LlmProvider[] = ["groq", "openrouter", "nvidia", "custom"];
 
-function isOpenAiCompatible(provider: LlmProvider): boolean {
+export function isOpenAiCompatible(provider: LlmProvider): boolean {
   return OPENAI_COMPATIBLE.includes(provider);
 }
 
@@ -36,7 +36,7 @@ export function openAiBase(cfg: LlmConfig): string {
 export function isConfigured(cfg: LlmConfig | undefined): boolean {
   if (!cfg || cfg.provider === "none") return false;
   if (cfg.provider === "ollama") return true;
-  if (cfg.provider === "custom") return Boolean(cfg.apiKey && cfg.baseUrl?.trim());
+  if (cfg.provider === "custom") return Boolean(cfg.baseUrl?.trim());
   return Boolean(cfg.apiKey);
 }
 
@@ -49,12 +49,12 @@ function assertConfigured(cfg: LlmConfig) {
     throw new Error("No LLM provider configured.");
   }
   if (cfg.provider === "custom" && !cfg.baseUrl?.trim()) {
-    throw new Error("Set the API base URL for your custom provider.");
+    throw new Error("Paste your provider's base URL (for Inferbase: https://api.inferbase.ai/v1).");
   }
   if (cfg.provider === "custom" && !cfg.model?.trim()) {
-    throw new Error("Set the model name for your custom provider.");
+    throw new Error("Pick a model: click \"Load models\" or type a model name.");
   }
-  if (cfg.provider !== "ollama" && !cfg.apiKey) {
+  if (cfg.provider !== "ollama" && cfg.provider !== "custom" && !cfg.apiKey) {
     throw new Error(`Missing API key for ${cfg.provider}.`);
   }
 }

@@ -38,12 +38,16 @@ const MODEL_HINTS: Record<LlmProvider, string> = {
   groq: PROVIDER_MODELS.groq ?? "",
   openrouter: PROVIDER_MODELS.openrouter ?? "",
   nvidia: PROVIDER_MODELS.nvidia ?? "",
-  custom: "model-name",
+  custom: "auto",
   ollama: PROVIDER_MODELS.ollama ?? "",
 };
 
 function isCloudProvider(provider: LlmProvider): boolean {
   return provider !== "none" && provider !== "ollama";
+}
+
+function canListModels(provider: LlmProvider): boolean {
+  return provider === "ollama" || provider === "custom" || provider === "nvidia" || provider === "groq" || provider === "openrouter";
 }
 
 type TestState = { kind: "idle" } | { kind: "testing" } | { kind: "ok"; reply: string } | { kind: "error"; error: string };
@@ -77,19 +81,31 @@ export function SettingsDialog({
 
   const effectiveModel =
     draft.model?.trim() ||
-    (draft.provider === "ollama" && models.length ? models[0] : "");
+    (models.length && canListModels(draft.provider) ? models[0] : "");
 
-  const fetchModels = async (baseUrl: string) => {
+  const fetchModels = async () => {
     setLoadingModels(true);
     setModelsError(null);
     try {
-      const res = await fetch(`/api/llm/models?baseUrl=${encodeURIComponent(baseUrl)}`);
+      const res = await fetch("/api/llm/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: draft.provider,
+          baseUrl: draft.baseUrl,
+          apiKey: draft.apiKey,
+        }),
+      });
       const data = (await res.json()) as { ok?: boolean; models?: string[]; error?: string };
       if (data.ok) {
         const list = data.models ?? [];
         setModels(list);
         if (!list.length) {
-          setModelsError("Ollama is running but has no models. Run `ollama pull llama3.2:3b`.");
+          setModelsError(
+            draft.provider === "ollama"
+              ? "Ollama is running but has no models. Run `ollama pull qwen2.5:7b`."
+              : "No models returned. Type the model name instead.",
+          );
         } else {
           setDraft((prev) =>
             prev.model && list.includes(prev.model) ? prev : { ...prev, model: list[0] },
@@ -108,7 +124,7 @@ export function SettingsDialog({
   };
 
   useEffect(() => {
-    if (open && draft.provider === "ollama") void fetchModels(draft.baseUrl || "http://localhost:11434");
+    if (open && draft.provider === "ollama") void fetchModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draft.provider]);
 
@@ -151,10 +167,12 @@ export function SettingsDialog({
               value={draft.provider}
               onValueChange={(v) => {
                 const next = v as LlmProvider;
+                setModels([]);
+                setModelsError(null);
                 setDraft({
                   ...draft,
                   provider: next,
-                  baseUrl: PROVIDER_BASE_URLS[next] ?? (next === "custom" ? draft.baseUrl : ""),
+                  baseUrl: PROVIDER_BASE_URLS[next] ?? "",
                   model: "",
                 });
               }}
@@ -175,14 +193,20 @@ export function SettingsDialog({
 
           {needsKey ? (
             <div className="space-y-2">
-              <Label htmlFor="apiKey">API key</Label>
+              <Label htmlFor="apiKey">
+                API key{draft.provider === "custom" ? " (optional for local servers)" : ""}
+              </Label>
               <Input
                 id="apiKey"
                 type="password"
                 autoComplete="off"
                 placeholder="Paste your key"
                 value={draft.apiKey}
-                onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
+                onChange={(e) => {
+                  setModels([]);
+                  setModelsError(null);
+                  setDraft({ ...draft, apiKey: e.target.value });
+                }}
               />
             </div>
           ) : null}
@@ -210,12 +234,18 @@ export function SettingsDialog({
               <Input
                 id="baseUrl"
                 type="url"
-                placeholder="https://api.example.com/v1"
+                placeholder="https://api.inferbase.ai/v1"
                 value={draft.baseUrl}
-                onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+                onChange={(e) => {
+                  setModels([]);
+                  setModelsError(null);
+                  setDraft({ ...draft, baseUrl: e.target.value });
+                }}
               />
               <p className="text-xs text-muted-foreground">
-                Any [OI]-compatible endpoint. Usually ends in <code>/v1</code>.
+                Copy the <code>base_url</code> from your provider&apos;s dashboard. It usually ends
+                in <code>/v1</code>. For Inferbase use{" "}
+                <code>https://api.inferbase.ai/v1</code>.
               </p>
             </div>
           ) : null}
@@ -227,18 +257,18 @@ export function SettingsDialog({
                   Model{" "}
                   {draft.provider === "ollama" || draft.provider === "custom" ? "" : "(optional)"}
                 </Label>
-                {draft.provider === "ollama" ? (
+                {canListModels(draft.provider) ? (
                   <button
                     type="button"
                     className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                    onClick={() => void fetchModels(draft.baseUrl || "http://localhost:11434")}
+                    onClick={() => void fetchModels()}
                     disabled={loadingModels}
                   >
-                    {loadingModels ? "Checking…" : "Refresh list"}
+                    {loadingModels ? "Checking…" : models.length ? "Refresh list" : "Load models"}
                   </button>
                 ) : null}
               </div>
-              {draft.provider === "ollama" && models.length ? (
+              {canListModels(draft.provider) && models.length ? (
                 <Select
                   value={effectiveModel}
                   onValueChange={(v) => setDraft({ ...draft, model: v })}
@@ -262,17 +292,17 @@ export function SettingsDialog({
                   onChange={(e) => setDraft({ ...draft, model: e.target.value })}
                 />
               )}
-              {draft.provider === "ollama" ? (
-                models.length ? (
-                  <p className="text-xs text-muted-foreground">
-                    Models installed on your machine. Pick the one you downloaded.
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {modelsError ??
-                      "Couldn't list your models. Type the name you pulled, e.g. llama3.2:3b."}
-                  </p>
-                )
+              {modelsError ? (
+                <p className="text-xs text-destructive">{modelsError}</p>
+              ) : canListModels(draft.provider) && models.length ? (
+                <p className="text-xs text-muted-foreground">
+                  {models.length} models available from this provider. Pick one from the list.
+                </p>
+              ) : canListModels(draft.provider) ? (
+                <p className="text-xs text-muted-foreground">
+                  Paste your key and base URL, then click Load models to see what you can use. You
+                  can also type a model name.
+                </p>
               ) : null}
             </div>
           ) : null}

@@ -49,6 +49,17 @@ For AI-written notes, open **Settings** and pick a provider.
 | **OpenRouter** | [openrouter.ai](https://openrouter.ai) | Many models, some free |
 | **Custom / free LLM API** | your provider | Any [OI]-compatible endpoint: base URL + key + model |
 
+For **Inferbase**, choose *Custom / free LLM API* and fill in:
+
+| Field | Value |
+| --- | --- |
+| API key | the key from your Inferbase dashboard |
+| API base URL | `https://api.inferbase.ai/v1` |
+| Model | click **Load models**, then pick `auto` (or a specific model) |
+
+Click **Load models** for any provider to see the exact model names it serves —
+no guessing required.
+
 Hosted providers process transcript sections **6 at a time** and handle the whole
 transcript in a single pass, so a 20-minute video typically finishes in **10–30 seconds**.
 
