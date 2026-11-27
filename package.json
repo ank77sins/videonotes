@@ -2,10 +2,14 @@
   "name": "ideavo-nextjs",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "setup": "bash setup.sh",
     "typecheck": "NODE_OPTIONS=--max-old-space-size=1024 tsc --noEmit"
   },
   "dependencies": {
