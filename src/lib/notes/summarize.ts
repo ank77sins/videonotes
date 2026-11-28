@@ -105,7 +105,8 @@ function styleInstruction(style: PdfOptions["style"]): string {
   switch (style) {
     case "outline":
       return "Emphasis: a hierarchical outline. Prefer short bullet blocks over paragraphs; nest detail under subsections.";
-          return "Emphasis: an ultra-dense exam cheatsheet. Prefer tables and 'Topic | fact, fact, fact' key-value lines over paragraphs. Merge repeated concepts into one line and mark them with a star symbol.";
+    case "study-guide":
+      return "Emphasis: an ultra-dense exam cheatsheet. Prefer tables and 'Topic | fact, fact, fact' key-value lines over paragraphs. Merge repeated concepts into one line and mark them with a star symbol.";
     case "qa":
       return "Emphasis: a Q&A document. Organise sections as questions with thorough answers, and fill the questions array.";
     default:
@@ -124,12 +125,24 @@ function depthInstruction(depth: PdfOptions["depth"]): string {
   }
 }
 
+function formatInstruction(audience: string): string {
+  const m = audience.match(/FORMAT:\s*([a-z-]+)/i);
+  const fmt = (m?.[1] ?? "").toLowerCase();
+  if (fmt === "flashcards")
+    return "FORMAT OVERRIDE: produce a flashcard deck. Fill the questions array with 20-40 high-yield Q/A pairs; keep sections minimal, one per topic.";
+  if (fmt === "summary")
+    return "FORMAT OVERRIDE: produce a structured summary: short paragraphs per topic with bolded key terms, plus a bullet recap at the end of each section.";
+  if (fmt === "slides")
+    return "FORMAT OVERRIDE: produce timestamped slide-style notes: one section per topic with its timestamp set, bullets only, each bullet starting with the key term in bold.";
+  return "FORMAT OVERRIDE: ultra-dense cheatsheet. Prefer table blocks and 'Topic | fact, fact, fact' key-value bullets; no paragraph longer than one line.";
+}
+
 const CHUNK_SYSTEM = [
   "You are an expert academic tutor creating a high-density study CHEATSHEET.",
   "STRICT RULES:",
   "1. DENSITY: Maximize information density. Use tables, bullet points, and key-value pairs. 1 line of output should replace 6-7 lines of conversational transcript.",
   "2. FORMAT: Use strict Key-Value pairs. Example: 'Lord Dalhousie | Railways (1853), Doctrine of Lapse, Postal Reforms'.",
-  "3. REPETITION: If a concept, date, or fact is emphasized or repeated multiple times in the lecture, compile it into a single entry and append a star (⭐). Example: 'Doctrine of Lapse ⭐ (High exam priority)'.",
+  "3. REPETITION: If a concept, date, or fact is emphasized or repeated multiple times in the lecture, compile it into a single entry and append a star (★). Example: 'Doctrine of Lapse ★ (High exam priority)'.",
   "4. NO FLUFF: Do not write introductory or concluding paragraphs. Output pure, structured facts. Remove all conversational filler.",
   "5. ZERO INFORMATION LOSS: Keep every fact, number, name, and date, but compress the wording heavily.",
   "Output Markdown only. No preamble, no commentary.",
@@ -140,12 +153,12 @@ const SYSTEM_PROMPT = [
   "ABSOLUTE RULES:",
   "1. DENSITY OVER PROSE: Use tables, bullet points, and key-value pairs. Never write long paragraphs. 1 line of output = 6-7 transcript lines.",
   "2. FORMAT: Use strict Key-Value pairs separated by pipes or bold headers. Example: 'Lord Dalhousie | Railways (1853), Doctrine of Lapse, Postal Reforms'.",
-  "3. REPETITION TRACKING: If a concept, date, or fact is repeated or emphasized, merge it into one line and append a star (⭐) with a note like '(High exam priority)'.",
+  "3. REPETITION TRACKING: If a concept, date, or fact is repeated or emphasized, merge it into one line and append a star (★) with a note like '(High exam priority)'.",
   "4. NO FLUFF: Zero intro or conclusion text. Pure facts only. Remove 'welcome to class', sponsor reads, and filler words.",
   "5. ZERO INFORMATION LOSS: Every fact, number, name, and date MUST appear, but heavily compressed.",
   "6. NEVER INVENT: Do not add outside knowledge. Mark garbled ASR as [unclear].",
   "BLOCK TYPES: use table for comparisons, bullets for dense key-value lists, and steps ONLY for exact procedures.",
-  "SELF-CHECK before answering: Is it dense enough? Did I use tables or key-value pairs? Did I mark repeated concepts with ⭐? Are there any conversational paragraphs left? (If yes, delete them).",
+  "SELF-CHECK before answering: Is it dense enough? Did I use tables or key-value pairs? Did I mark repeated concepts with a star? Are there any conversational paragraphs left? (If yes, delete them).",
 ].join(" ");
 
 const SCHEMA_HINT = [
@@ -211,7 +224,11 @@ function slidesPromptBlock(slides: SlideItem[]): string {
 }
 
 function cleanText(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/⭐/g, "★")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function cleanList(value: unknown, limit = 400): string[] {
@@ -297,6 +314,7 @@ async function synthesize(
     SYSTEM_PROMPT,
     `Write in ${options.language}. Target reader: ${options.audience}. Tone: ${options.tone}.`,
     styleInstruction(options.style),
+    formatInstruction(options.audience),
     depthInstruction(options.depth),
     options.includeTimestamps
       ? "Set each section's timestamp field to the moment that section starts."
