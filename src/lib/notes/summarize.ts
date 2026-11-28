@@ -12,6 +12,8 @@ import type {
   VideoMeta,
 } from "../types";
 import { formatTimestamp } from "../youtube/url";
+import fs from "node:fs";
+import path from "node:path";
 
 const CHUNK_CHARS = 9000;
 const MAX_TRANSCRIPT_CHARS = 120000;
@@ -319,7 +321,7 @@ async function synthesize(
   const body = chunkNotes.join("\n\n").slice(0, MAX_TRANSCRIPT_CHARS);
   const system = [
     SYSTEM_PROMPT,
-    `Write in ${options.language}. Target reader: ${options.audience}. Tone: ${options.tone}.`,
+    `LANGUAGE RULE: write the ENTIRE document in ${options.language}, translating if the source audio is in a different language; keep proper nouns, act names and standard technical terms in their commonly used form. Target reader: ${options.audience}. Tone: ${options.tone}.`,
     styleInstruction(options.style),
     formatInstruction(options.audience),
     depthInstruction(options.depth),
@@ -510,6 +512,35 @@ function extractiveNotes(
   };
 }
 
+// ===== TEMP FILE MANAGEMENT =====
+
+function saveTranscriptToTemp(segments: TranscriptSegment[], meta: VideoMeta): string {
+  const dataDir = path.join(process.cwd(), "data");
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  const safeTitle = meta.title.replace(/[^a-z0-9]/gi, "_").substring(0, 50);
+  const timestamp = Date.now();
+  const filePath = path.join(dataDir, `transcript_${safeTitle}_${timestamp}.txt`);
+
+  const transcriptText = segments.map(s => `[${formatTimestamp(s.start)}] ${s.text}`).join("\n");
+  fs.writeFileSync(filePath, transcriptText, "utf-8");
+
+  return filePath;
+}
+
+function deleteTempTranscript(filePath: string): void {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Deleted temp transcript: ${filePath}`);
+    }
+  } catch (err) {
+    console.error("Failed to delete temp transcript:", err);
+  }
+}
+
+// ===== MAIN EXPORT =====
+
 export async function buildNotes(
   segments: TranscriptSegment[],
   meta: VideoMeta,
@@ -517,12 +548,18 @@ export async function buildNotes(
   slides: SlideItem[],
   cfg: LlmConfig,
   onProgress?: (step: string, pct: number) => void,
-): Promise<{ notes: NotesDocument; usedAi: boolean }> {
+): Promise<{ notes: NotesDocument; usedAi: boolean; tempFilePath?: string }> {
   const fallback = () => extractiveNotes(segments, meta, options, slides);
+
+  // STAGE 1: Always save transcript to temp file (no AI needed)
+  onProgress?.("Saving transcript to temp file", 5);
+  const tempFilePath = saveTranscriptToTemp(segments, meta);
+  console.log(`Transcript saved to: ${tempFilePath}`);
+  onProgress?.("Transcript saved", 10);
 
   if (!isConfigured(cfg)) {
     onProgress?.("Summarizing transcript (basic mode)", 100);
-    return { notes: fallback(), usedAi: false };
+    return { notes: fallback(), usedAi: false, tempFilePath };
   }
 
   try {
@@ -534,6 +571,7 @@ export async function buildNotes(
       const single = rawChunks.map((c) => c.text).join("\n").slice(0, MAX_TRANSCRIPT_CHARS);
       const notes = await synthesize([single], meta, options, slides, cfg);
       onProgress?.("Writing notes (single pass)", 100);
+      deleteTempTranscript(tempFilePath);
       return { notes, usedAi: true };
     }
 
@@ -546,10 +584,19 @@ export async function buildNotes(
     onProgress?.("Assembling final document", 50);
     const notes = await synthesize(chunkNotes, meta, options, slides, cfg);
     onProgress?.("Assembling final document", 100);
+    deleteTempTranscript(tempFilePath);
     return { notes, usedAi: true };
   } catch (err) {
     onProgress?.("Falling back to basic notes", 100);
     const reason = err instanceof Error ? err.message : "The AI model failed.";
-    return { notes: { ...fallback(), warning: reason }, usedAi: false };
+    console.log(`AI failed. Temp transcript kept at: ${tempFilePath}`);
+    return {
+      notes: {
+        ...fallback(),
+        warning: `${reason}. Transcript saved to: ${tempFilePath}. You can retry AI generation with this file.`,
+      },
+      usedAi: false,
+      tempFilePath,
+    };
   }
 }
