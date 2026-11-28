@@ -38,10 +38,10 @@ function buildChunks(segments: TranscriptSegment[]): Chunk[] {
   return chunks;
 }
 
-const LOCAL_MAX_CHUNKS = 8;
-const CLOUD_MAX_CHUNKS = 12;
+const LOCAL_MAX_CHUNKS = 10;
+const CLOUD_MAX_CHUNKS = 24;
 const LOCAL_SINGLE_PASS_CHARS = 24000;
-const CLOUD_SINGLE_PASS_CHARS = 90000;
+const CLOUD_SINGLE_PASS_CHARS = 60000;
 const LOCAL_CONCURRENCY = 2;
 const CLOUD_CONCURRENCY = 6;
 
@@ -62,14 +62,14 @@ function concurrencyFor(cfg: LlmConfig): number {
 }
 
 function chunkTokensFor(cfg: LlmConfig): number {
-  return isCloud(cfg) ? 1400 : 700;
+  return isCloud(cfg) ? 1000 : 600;
 }
 
 function finalTokensFor(cfg: LlmConfig, depth: PdfOptions["depth"]): number {
   const cloud = isCloud(cfg);
-  if (depth === "brief") return cloud ? 3500 : 1800;
-  if (depth === "detailed") return cloud ? 8000 : 3000;
-  return cloud ? 6000 : 2400;
+  if (depth === "brief") return cloud ? 3000 : 1800;
+  if (depth === "detailed") return cloud ? 6000 : 3000;
+  return cloud ? 4500 : 2400;
 }
 
 function mergeIntoFew(chunks: Chunk[], maxChunks: number): Chunk[] {
@@ -138,27 +138,31 @@ function formatInstruction(audience: string): string {
 }
 
 const CHUNK_SYSTEM = [
-  "You are an expert academic tutor creating a high-density study CHEATSHEET.",
-  "STRICT RULES:",
-  "1. DENSITY: Maximize information density. Use tables, bullet points, and key-value pairs. 1 line of output should replace 6-7 lines of conversational transcript.",
-  "2. FORMAT: Use strict Key-Value pairs. Example: 'Lord Dalhousie | Railways (1853), Doctrine of Lapse, Postal Reforms'.",
-  "3. REPETITION: If a concept, date, or fact is emphasized or repeated multiple times in the lecture, compile it into a single entry and append a star (★). Example: 'Doctrine of Lapse ★ (High exam priority)'.",
-  "4. NO FLUFF: Do not write introductory or concluding paragraphs. Output pure, structured facts. Remove all conversational filler.",
-  "5. ZERO INFORMATION LOSS: Keep every fact, number, name, and date, but compress the wording heavily.",
-  "Output Markdown only. No preamble, no commentary.",
+  "You are slicing a lecture transcript for a master note-maker.",
+  "Rewrite this slice as a dense factual markdown outline IN YOUR OWN WORDS (never copy speaker sentences).",
+  "Use '## ' topic headings, '- Term | fact, fact' bullets, markdown pipe tables for people/dates/comparisons, numbered lists for procedures.",
+  "Keep EVERY name, date, number, definition, formula, example, caveat. Drop filler, jokes and small talk.",
+  "If a fact is stressed or repeated, keep it once and mark it with ★.",
+  "Mark garbled audio as [unclear: best guess]. Skip sponsor reads.",
+  "Output markdown only. No preamble.",
 ].join(" ");
 
 const SYSTEM_PROMPT = [
-  "ROLE: You are an expert academic tutor generating a high-density CHEATSHEET from a YouTube transcript.",
+  "ROLE: You are a world-class exam coach and note-maker. You convert raw YouTube lecture transcripts into a perfectly structured, ultra-dense study document.",
+  "OUTPUT SHAPE: hierarchical document: H1 title -> sections (topics/chapters) -> blocks (tables, bullets, steps) -> subsections when a topic splits.",
   "ABSOLUTE RULES:",
-  "1. DENSITY OVER PROSE: Use tables, bullet points, and key-value pairs. Never write long paragraphs. 1 line of output = 6-7 transcript lines.",
-  "2. FORMAT: Use strict Key-Value pairs separated by pipes or bold headers. Example: 'Lord Dalhousie | Railways (1853), Doctrine of Lapse, Postal Reforms'.",
-  "3. REPETITION TRACKING: If a concept, date, or fact is repeated or emphasized, merge it into one line and append a star (★) with a note like '(High exam priority)'.",
-  "4. NO FLUFF: Zero intro or conclusion text. Pure facts only. Remove 'welcome to class', sponsor reads, and filler words.",
-  "5. ZERO INFORMATION LOSS: Every fact, number, name, and date MUST appear, but heavily compressed.",
-  "6. NEVER INVENT: Do not add outside knowledge. Mark garbled ASR as [unclear].",
-  "BLOCK TYPES: use table for comparisons, bullets for dense key-value lists, and steps ONLY for exact procedures.",
-  "SELF-CHECK before answering: Is it dense enough? Did I use tables or key-value pairs? Did I mark repeated concepts with a star? Are there any conversational paragraphs left? (If yes, delete them).",
+  "1. REWRITE, NEVER COPY. Never reproduce speaker sentences verbatim. Every idea becomes a condensed fact line in your own words.",
+  "2. DENSITY: 1 bullet = 1 fact. Prefer 'Term | fact, fact, fact' key-value lines and tables. One page of output must cover 10+ minutes of video.",
+  "3. STRUCTURE: group by topic/chapter with descriptive headings (e.g. 'Viceroys & Their Reforms (1848-1872)'), in chronological or logical order.",
+  "4. TABLES MANDATORY: any person/act/date/formula/comparison with 2+ attributes becomes a table block (headers like: Name | Year | Key Acts | Impact).",
+  "5. REPETITION = IMPORTANCE: if a fact or concept is repeated or stressed, write it ONCE and append '★ (repeated - high exam priority)'.",
+  "6. KEEP ALL FACTS: names, dates, numbers, articles, sections, formulas, case names, definitions. Compress words, never content.",
+  "7. ZERO FLUFF: no introductions, no conclusions, no 'the speaker explains', no motivational talk, no sponsor content.",
+  "8. DEFINITIONS: collect key terms in a section titled 'Key Terms & Definitions' as a table (Term | Meaning).",
+  "9. FINALE: end with a section titled 'One-Page Rapid Revision' containing one table: Topic | Must-Remember Facts.",
+  "10. NEVER INVENT: nothing outside the transcript. Garbled audio -> [unclear: best guess]. Speaker opinions -> 'claims: ...'.",
+  "BLOCK DISCIPLINE: para only for 1-2 line context; bullets max ~2 lines each; steps only for procedures; tables for everything multi-attribute.",
+  "SELF-CHECK before answering: Could a topper revise ONLY from this? Any verbatim transcript sentence left? Any topic without a table or bullets? Fix, then answer.",
 ].join(" ");
 
 const SCHEMA_HINT = [
@@ -168,7 +172,10 @@ const SCHEMA_HINT = [
   '"blocks": [{"type":"para","text":string} | {"type":"bullets","items":string[]} | {"type":"steps","items":string[]} | {"type":"table","headers":string[],"rows":string[][]}],',
   '"subsections": [{"heading": string, "blocks": [...]}]}],',
   '"questions": [{"q": string, "a": string}], "excluded": string[]}',
-  "overview is 2-4 sentences. keyTakeaways has at most 5 bullets, each a fact from the transcript. timestamp is total seconds or null. questions only for study-guide or qa styles, otherwise [].",
+  "overview is 1-2 sentences. keyTakeaways has at most 5 bullets, each a fact from the transcript. timestamp is total seconds or null.",
+  "Prefer table and bullets blocks; use para only for 1-2 sentence context; every section must contain at least one table or bullets block.",
+  "Include 'Key Terms & Definitions' and 'One-Page Rapid Revision' as the last two sections.",
+  "questions only for study-guide or qa styles, otherwise [].",
 ].join(" ");
 
 async function mapChunks(
@@ -325,13 +332,14 @@ async function synthesize(
   const user = [
     `Video: "${meta.title}" by ${meta.channel}.`,
     "The transcript was processed in order. Rebuild it into one coherent, de-duplicated document: merge overlapping sections, keep the original order of ideas, and state repeated information once in the most logical place.",
+    "IMPORTANT: the result must NOT read like a transcript. Never quote or paraphrase the speaker verbatim; convert everything into condensed fact lines, tables and key-value bullets.",
     "",
     "Source material:",
     body,
     slidesPromptBlock(slides),
   ].join("\n");
 
-  const raw = await complete(
+  let raw = await complete(
     cfg,
     [
       { role: "system", content: system },
@@ -340,7 +348,25 @@ async function synthesize(
     { temperature: 0.2, maxTokens: finalTokensFor(cfg, options.depth) },
   );
 
-  const parsed = safeJson<Record<string, unknown>>(raw);
+  let parsed = safeJson<Record<string, unknown>>(raw);
+
+  if (!parsed) {
+    raw = await complete(
+      cfg,
+      [
+        {
+          role: "system",
+          content:
+            system +
+            " Your previous attempt failed JSON validation. This time respond with ONLY the raw JSON object: no prose, no explanations, no code fences.",
+        },
+        { role: "user", content: user },
+      ],
+      { temperature: 0.1, maxTokens: finalTokensFor(cfg, options.depth) },
+    );
+    parsed = safeJson<Record<string, unknown>>(raw);
+  }
+
   if (!parsed) throw new Error("The model did not return valid notes JSON.");
 
   const sections = normalizeSections(parsed.sections);
@@ -391,7 +417,7 @@ function extractiveNotes(
   slides: SlideItem[],
 ): NotesDocument {
   const fullText = segments.map((s) => s.text).join(" ");
-  const bucketSeconds = 300;
+  const bucketSeconds = 600;
   const total = segments.length ? segments[segments.length - 1].start : 0;
   const sections: NotesSection[] = [];
 
@@ -399,7 +425,7 @@ function extractiveNotes(
     const inBucket = segments.filter((s) => s.start >= start && s.start < start + bucketSeconds);
     if (!inBucket.length) continue;
     const text = inBucket.map((s) => s.text).join(" ");
-    const bullets = extractiveKeyPoints(text, 6);
+    const bullets = extractiveKeyPoints(text, 8).map((b) => b.replace(/\s+/g, " ").slice(0, 200));
     if (!bullets.length) continue;
     sections.push({
       heading: labelFromText(text, `From ${formatTimestamp(start)}`),
