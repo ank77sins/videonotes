@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, FileDown, Loader2, Sparkles, Info, Brain, Layers, FileText, Clock } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, FileDown, Loader2, Sparkles, Info, Brain, Layers, FileText, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,7 @@ export function PdfOptionsForm({
     depth: "detailed",
     tone: "academic",
     style: "study-guide", 
+    includeSlides: true, // Default
   });
 
   // Wizard specific states
@@ -51,19 +52,24 @@ export function PdfOptionsForm({
   const [mergeRepetitions, setMergeRepetitions] = useState(true);
   const [excludeFluff, setExcludeFluff] = useState(true);
 
+  // 🚨 CRASH PREVENTION SAFETY SWITCH 🚨
+  // If video is longer than 2 hours (7200 seconds), auto-disable slides to prevent RAM crash
+  const isLongVideo = (video.meta.durationSeconds ?? 0) > 7200;
+  
+  useEffect(() => {
+    if (isLongVideo && options.includeSlides) {
+      setOptions(prev => ({ ...prev, includeSlides: false }));
+    }
+  }, [isLongVideo]);
+
   const set = <K extends keyof PdfOptions>(key: K, value: PdfOptions[K]) =>
     setOptions((prev) => ({ ...prev, [key]: value }));
 
   const meta: VideoMeta = video.meta;
-
-  // Disable generate button until required wizard steps are filled
   const isFormValid = subject.trim() !== "" && level.trim() !== "" && outputFormat.trim() !== "";
 
   const handleGenerate = () => {
-    // We pack the wizard data into the 'audience' field so the backend AI can read it
-    // without us having to rewrite your entire backend type system right now.
     const wizardData = `SUBJECT: ${subject} | LEVEL: ${level} | FORMAT: ${outputFormat} | RULES: ${mergeRepetitions ? 'Merge Repetitions' : ''}, ${excludeFluff ? 'Exclude Fluff' : ''}`;
-    
     onGenerate({
         ...options,
         audience: wizardData, 
@@ -73,14 +79,9 @@ export function PdfOptionsForm({
 
   return (
     <div className="space-y-6">
-      {/* Video Thumbnail & Meta */}
       <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={meta.thumbnail}
-          alt=""
-          className="h-16 w-28 flex-none rounded-md object-cover"
-        />
+        <img src={meta.thumbnail} alt="" className="h-16 w-28 flex-none rounded-md object-cover" />
         <div className="min-w-0">
           <p className="truncate font-medium">{meta.title}</p>
           <p className="truncate text-sm text-muted-foreground">{meta.channel}</p>
@@ -90,21 +91,16 @@ export function PdfOptionsForm({
         </div>
       </div>
 
-      {!aiEnabled ? (
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-          <Info className="mt-0.5 size-4 flex-none text-muted-foreground" aria-hidden />
+      {/* LONG VIDEO WARNING */}
+      {isLongVideo && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900 dark:border-red-500/50 dark:bg-red-900/20 dark:text-red-200">
+          <AlertTriangle className="mt-0.5 size-5 flex-none" />
           <div>
-            <p className="font-medium">Basic mode</p>
-            <p className="text-muted-foreground">
-              Without an AI key you get extractive notes and OCR slide text. Add a free key for
-              real summaries and slide descriptions.
-            </p>
-            <Button variant="link" className="h-auto p-0" onClick={onOpenSettings} type="button">
-              Add an API key
-            </Button>
+            <p className="font-bold">⚠️ 36-Hour Video Detected (Crash Prevention Active)</p>
+            <p className="mt-1">Extracting slides for videos over 2 hours consumes massive amounts of RAM and will crash your computer. Slides extraction has been automatically disabled to save your PDF generation. Pure transcript processing is safe!</p>
           </div>
         </div>
-      ) : null}
+      )}
 
       <div className="rounded-lg border border-primary/50 bg-primary/5 p-4 space-y-4">
         <h3 className="text-lg font-bold flex items-center gap-2">
@@ -114,19 +110,12 @@ export function PdfOptionsForm({
         <div className="grid gap-4 sm:grid-cols-2">
             <div className={fieldClass}>
                 <Label htmlFor="subject">Specific Subject / Topic *</Label>
-                <Input
-                    id="subject"
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    placeholder="e.g. Modern Indian History, Biology 101, React.js"
-                />
+                <Input id="subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Modern Indian History" />
             </div>
             <div className={fieldClass}>
                 <Label htmlFor="level">Target Level *</Label>
                 <Select value={level} onValueChange={setLevel}>
-                    <SelectTrigger id="level">
-                        <SelectValue placeholder="Select level" />
-                    </SelectTrigger>
+                    <SelectTrigger id="level"><SelectValue placeholder="Select level" /></SelectTrigger>
                     <SelectContent>
                         <SelectItem value="high-school">High School</SelectItem>
                         <SelectItem value="college-exam">College / Competitive Exam</SelectItem>
@@ -149,42 +138,31 @@ export function PdfOptionsForm({
                 <div className="mt-1"><FileText className="size-4" /></div>
                 <span className="space-y-1">
                     <span className="block text-sm font-medium">⚡ Ultra-Dense Cheatsheet</span>
-                    <span className="block text-xs text-muted-foreground">
-                        Tables, key-value pairs. 1 line replaces 6-7 transcript lines. Best for exams.
-                    </span>
+                    <span className="block text-xs text-muted-foreground">Tables, key-value pairs. 1 line replaces 6-7 transcript lines.</span>
                 </span>
             </label>
-
             <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-all ${outputFormat === 'flashcards' ? 'border-primary bg-primary/10' : ''}`}>
                 <input type="radio" name="format" checked={outputFormat === 'flashcards'} onChange={() => setOutputFormat('flashcards')} className="sr-only" />
                 <div className="mt-1"><Layers className="size-4" /></div>
                 <span className="space-y-1">
-                    <span className="block text-sm font-medium">🧠 Flashcards & Active Recall</span>
-                    <span className="block text-xs text-muted-foreground">
-                        Q&A format ready for Anki or Quizlet.
-                    </span>
+                    <span className="block text-sm font-medium">🧠 Flashcards</span>
+                    <span className="block text-xs text-muted-foreground">Q&A format ready for Anki or Quizlet.</span>
                 </span>
             </label>
-
             <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-all ${outputFormat === 'summary' ? 'border-primary bg-primary/10' : ''}`}>
                 <input type="radio" name="format" checked={outputFormat === 'summary'} onChange={() => setOutputFormat('summary')} className="sr-only" />
                 <div className="mt-1"><FileText className="size-4" /></div>
                 <span className="space-y-1">
                     <span className="block text-sm font-medium">📖 Detailed Summary</span>
-                    <span className="block text-xs text-muted-foreground">
-                        Structured paragraphs with headings and bullet points.
-                    </span>
+                    <span className="block text-xs text-muted-foreground">Structured paragraphs with headings.</span>
                 </span>
             </label>
-
             <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-all ${outputFormat === 'slides' ? 'border-primary bg-primary/10' : ''}`}>
                 <input type="radio" name="format" checked={outputFormat === 'slides'} onChange={() => setOutputFormat('slides')} className="sr-only" />
                 <div className="mt-1"><Clock className="size-4" /></div>
                 <span className="space-y-1">
-                    <span className="block text-sm font-medium">⏱️ Timestamped Slide Deck</span>
-                    <span className="block text-xs text-muted-foreground">
-                        Slide-by-slide notes with timestamps.
-                    </span>
+                    <span className="block text-sm font-medium">⏱️ Timestamped Deck</span>
+                    <span className="block text-xs text-muted-foreground">Slide-by-slide notes with timestamps.</span>
                 </span>
             </label>
         </div>
@@ -194,80 +172,61 @@ export function PdfOptionsForm({
         <h3 className="text-lg font-bold">Step 3: Strict Processing Rules</h3>
         <div className="grid gap-3 sm:grid-cols-2">
             <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer">
-                <Checkbox
-                    checked={mergeRepetitions}
-                    onCheckedChange={(v) => setMergeRepetitions(v === true)}
-                />
+                <Checkbox checked={mergeRepetitions} onCheckedChange={(v) => setMergeRepetitions(v === true)} />
                 <span className="space-y-1">
                     <span className="block text-sm font-medium">Merge Repetitions with ⭐</span>
-                    <span className="block text-xs text-muted-foreground">
-                        If a concept is repeated, compile it into one line and mark it as high priority.
-                    </span>
+                    <span className="block text-xs text-muted-foreground">Compile repeated concepts and mark as high priority.</span>
                 </span>
             </label>
-
             <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer">
-                <Checkbox
-                    checked={excludeFluff}
-                    onCheckedChange={(v) => setExcludeFluff(v === true)}
-                />
+                <Checkbox checked={excludeFluff} onCheckedChange={(v) => setExcludeFluff(v === true)} />
                 <span className="space-y-1">
                     <span className="block text-sm font-medium">Exclude Conversational Fluff</span>
-                    <span className="block text-xs text-muted-foreground">
-                        Remove "Welcome to the class", intros, and sponsor segments.
-                    </span>
+                    <span className="block text-xs text-muted-foreground">Remove intros, outros, and sponsor segments.</span>
                 </span>
             </label>
         </div>
       </div>
 
-      {/* Advanced Options (Collapsed by default to keep UI clean) */}
       <details className="rounded-lg border p-4">
           <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
-             Advanced Settings (Language, Author, Cover Title)
+             Advanced Settings & Visuals
           </summary>
           <div className="grid gap-4 sm:grid-cols-2 mt-4">
+             <label className="flex items-start gap-3 rounded-lg border p-3 sm:col-span-2">
+                <Checkbox
+                    checked={options.includeSlides}
+                    onCheckedChange={(v) => set("includeSlides", v === true)}
+                    disabled={isLongVideo}
+                />
+                <span className="space-y-1">
+                    <span className="block text-sm font-medium">Capture Slides & Visuals</span>
+                    <span className="block text-xs text-muted-foreground">
+                        {isLongVideo ? "⚠️ Disabled for videos > 2 hours to prevent RAM crash." : "Downloads video to capture frames. Slower."}
+                    </span>
+                </span>
+            </label>
             <div className={fieldClass}>
                 <Label htmlFor="language">Language</Label>
-                <Input id="language" value={options.language} onChange={(e) => set("language", e.target.value)} placeholder="e.g. English" />
+                <Input id="language" value={options.language} onChange={(e) => set("language", e.target.value)} />
             </div>
             <div className={fieldClass}>
                 <Label htmlFor="coverTitle">Cover title</Label>
-                <Input id="coverTitle" value={options.coverTitle} onChange={(e) => set("coverTitle", e.target.value)} placeholder={meta.title} />
-            </div>
-            <div className={fieldClass}>
-                <Label htmlFor="author">Prepared by (optional)</Label>
-                <Input id="author" value={options.author} onChange={(e) => set("author", e.target.value)} placeholder="Your name" />
+                <Input id="coverTitle" value={options.coverTitle} onChange={(e) => set("coverTitle", e.target.value)} />
             </div>
           </div>
       </details>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between pt-4 border-t">
         <Button variant="ghost" onClick={onBack} disabled={generating} type="button" className="gap-2">
-          <ArrowLeft className="size-4" aria-hidden />
-          Back
+          <ArrowLeft className="size-4" aria-hidden /> Back
         </Button>
-        
-        {!isFormValid && (
-            <p className="text-xs text-destructive flex items-center self-center sm:mr-auto">
-                * Please complete Step 1 and Step 2 to generate.
-            </p>
-        )}
-
+        {!isFormValid && <p className="text-xs text-destructive flex items-center self-center sm:mr-auto">* Please complete Step 1 and Step 2</p>}
         <Button onClick={handleGenerate} disabled={generating || !isFormValid} className="gap-2">
-          {generating ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <FileDown className="size-4" aria-hidden />
-          )}
+          {generating ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
           {generating ? "Starting…" : "Generate Cheatsheet PDF"}
         </Button>
       </div>
-
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Sparkles className="size-3.5" aria-hidden />
-        {aiEnabled ? "AI summaries enabled" : "Basic extractive mode"} · language {options.language || "—"}
-      </p>
     </div>
   );
 }
