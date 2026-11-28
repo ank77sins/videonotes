@@ -105,8 +105,7 @@ function styleInstruction(style: PdfOptions["style"]): string {
   switch (style) {
     case "outline":
       return "Emphasis: a hierarchical outline. Prefer short bullet blocks over paragraphs; nest detail under subsections.";
-    case "study-guide":
-      return "Emphasis: a study guide. Explain key concepts, keep definitions, and add review questions with answers.";
+          return "Emphasis: an ultra-dense exam cheatsheet. Prefer tables and 'Topic | fact, fact, fact' key-value lines over paragraphs. Merge repeated concepts into one line and mark them with a star symbol.";
     case "qa":
       return "Emphasis: a Q&A document. Organise sections as questions with thorough answers, and fill the questions array.";
     default:
