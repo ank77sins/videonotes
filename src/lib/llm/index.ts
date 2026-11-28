@@ -144,7 +144,7 @@ export async function complete(
   }
 
   if (cfg.provider === "ollama") {
-    const base = (cfg.baseUrl || "http://localhost:11434").replace(/\/$/, "");
+   const base = (cfg.baseUrl || "http://127.0.0.1:11434").replace(/\/$/, "").replace("://localhost:", "://127.0.0.1:");
 
     let ollamaModel = model;
     if (!cfg.model?.trim()) {
