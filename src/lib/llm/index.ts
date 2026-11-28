@@ -95,7 +95,7 @@ async function postJson(
 
 function timeoutFor(cfg: LlmConfig, maxTokens: number): number {
   if (cfg.provider === "ollama") {
-    return Math.max(300_000, maxTokens * 120);
+    return Math.max(600_000, maxTokens * 120);
   }
   return DEFAULT_TIMEOUT_MS;
 }
