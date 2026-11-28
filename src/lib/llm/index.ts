@@ -59,7 +59,7 @@ function assertConfigured(cfg: LlmConfig) {
   }
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
 
 async function postJson(
   url: string,
