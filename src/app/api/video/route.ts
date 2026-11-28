@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import type { TranscriptSegment, VideoMeta } from "@/lib/types";
 import { getCachedTranscript, saveCachedTranscript } from "@/lib/db";
-import { parseVideoId } from "@/lib/youtube/url";
+import { parseVideoId, formatTimestamp } from "@/lib/youtube/url";
 import { fetchMetadata } from "@/lib/youtube/metadata";
 import { fetchTranscript, parseSubtitles, segmentsToText } from "@/lib/youtube/transcript";
 import { writeTempCookies } from "@/lib/youtube/cookies";
 import { classifyYoutubeError } from "@/lib/youtube/errors";
+import fs from "node:fs";
+import path from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,21 @@ interface CachedVideo {
   source: string;
   segments: TranscriptSegment[];
   text: string;
+}
+
+// Helper to save transcript to a temp .txt file
+function saveTranscriptToTemp(segments: TranscriptSegment[], meta: VideoMeta): string {
+  const dataDir = path.join(process.cwd(), "data");
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  const safeTitle = meta.title.replace(/[^a-z0-9]/gi, "_").substring(0, 50);
+  const timestamp = Date.now();
+  const filePath = path.join(dataDir, `transcript_${safeTitle}_${timestamp}.txt`);
+
+  const transcriptText = segments.map(s => `[${formatTimestamp(s.start)}] ${s.text}`).join("\n");
+  fs.writeFileSync(filePath, transcriptText, "utf-8");
+
+  return filePath;
 }
 
 function manualToSegments(raw: string): TranscriptSegment[] {
@@ -76,6 +93,7 @@ export async function POST(req: Request) {
     if (!body.manualTranscript?.trim()) {
       const cached = getCachedTranscript<CachedVideo>(videoId);
       if (cached?.segments?.length) {
+        const tempFilePath = saveTranscriptToTemp(cached.segments, cached.meta);
         return NextResponse.json({
           ok: true,
           meta: cached.meta,
@@ -83,6 +101,7 @@ export async function POST(req: Request) {
           hasTranscript: true,
           segments: cached.segments,
           text: cached.text,
+          tempFilePath,
           cached: true,
         });
       }
@@ -98,6 +117,7 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
+      const tempFilePath = saveTranscriptToTemp(segments, meta);
       return NextResponse.json({
         ok: true,
         meta,
@@ -105,6 +125,7 @@ export async function POST(req: Request) {
         hasTranscript: true,
         segments,
         text: segmentsToText(segments),
+        tempFilePath,
       });
     }
 
@@ -127,6 +148,8 @@ export async function POST(req: Request) {
 
     const text = segmentsToText(segments);
     saveCachedTranscript(videoId, { meta, source, segments, text });
+    
+    const tempFilePath = saveTranscriptToTemp(segments, meta);
 
     return NextResponse.json({
       ok: true,
@@ -135,6 +158,7 @@ export async function POST(req: Request) {
       hasTranscript: true,
       segments,
       text,
+      tempFilePath,
     });
   } catch (err) {
     const classified = classifyYoutubeError(err);
